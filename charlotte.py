@@ -495,12 +495,50 @@ class Interpreter:
 
     # ── Expression evaluator ──
 
+    def _is_complete_string(self, expr: str) -> bool:
+        """Check if expr is a single complete string literal (not two strings joined by an op)."""
+        if len(expr) < 2:
+            return False
+        q = expr[0]
+        if q not in ('"', "'"):
+            return False
+        i = 1
+        while i < len(expr):
+            if expr[i] == '\\':
+                i += 2
+                continue
+            if expr[i] == q:
+                return i == len(expr) - 1
+            i += 1
+        return False
+
+    def _rfind_operator(self, expr: str, op: str) -> int:
+        """Find rightmost operator position respecting parentheses/brackets/braces/strings."""
+        depth = 0
+        in_string = False
+        string_char = None
+        result = -1
+        for i in range(len(expr) - len(op) + 1):
+            ch = expr[i]
+            if not in_string and ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+            elif in_string and ch == string_char and (i == 0 or expr[i-1] != '\\'):
+                in_string = False
+            if not in_string:
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+                if depth == 0 and expr[i:i + len(op)] == op:
+                    result = i
+        return result
+
     def _evaluate(self, expr: str, ln: int):
         expr = expr.strip()
 
-        # String literals
-        if (expr.startswith('"') and expr.endswith('"')) or \
-           (expr.startswith("'") and expr.endswith("'")):
+        # String literals — must be a single complete string, not "a" + "b"
+        if self._is_complete_string(expr):
             return expr[1:-1]
 
         # f-strings
@@ -631,8 +669,14 @@ class Interpreter:
                     return left if self._is_truthy(left) else self._evaluate(expr[idx + len(op):], ln)
 
         # String concatenation ~
-        if " ~ " in expr:
-            parts = expr.split(" ~ ")
+        idx = self._find_operator(expr, " ~ ")
+        if idx != -1:
+            parts = []
+            while idx != -1:
+                parts.append(expr[:idx])
+                expr = expr[idx + 3:]
+                idx = self._find_operator(expr, " ~ ")
+            parts.append(expr)
             return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
 
         # Comparisons
@@ -648,15 +692,15 @@ class Interpreter:
             (" in ", lambda a, b: a in b if isinstance(b, (list, dict)) else str(a) in str(b)),
         ]
         for op_str, op_fn in comparisons:
-            idx = expr.find(op_str)
+            idx = self._find_operator(expr, op_str)
             if idx != -1:
                 left = self._evaluate(expr[:idx], ln)
                 right = self._evaluate(expr[idx + len(op_str):], ln)
                 return op_fn(left, right)
 
-        # Arithmetic: + - (scan right to left for correct precedence)
+        # Arithmetic: + - (scan right to left, respecting parens)
         for op in (" + ", " - "):
-            idx = expr.rfind(op)
+            idx = self._rfind_operator(expr, op)
             if idx > 0:
                 left = self._evaluate(expr[:idx], ln)
                 right = self._evaluate(expr[idx + len(op):], ln)
@@ -668,7 +712,7 @@ class Interpreter:
 
         # Arithmetic: * / // %
         for op in (" // ", " / ", " * ", " % "):
-            idx = expr.rfind(op)
+            idx = self._rfind_operator(expr, op)
             if idx > 0:
                 left = self._evaluate(expr[:idx], ln)
                 right = self._evaluate(expr[idx + len(op):], ln)
@@ -720,15 +764,24 @@ class Interpreter:
         )
 
     def _find_operator(self, expr: str, op: str) -> int:
-        """Find operator position respecting parentheses/brackets/braces."""
+        """Find leftmost operator position respecting parentheses/brackets/braces/strings."""
         depth = 0
+        in_string = False
+        string_char = None
         for i in range(len(expr) - len(op) + 1):
-            if expr[i] in "([{":
-                depth += 1
-            elif expr[i] in ")]}":
-                depth -= 1
-            if depth == 0 and expr[i:i + len(op)] == op:
-                return i
+            ch = expr[i]
+            if not in_string and ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+            elif in_string and ch == string_char and (i == 0 or expr[i-1] != '\\'):
+                in_string = False
+            if not in_string:
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+                if depth == 0 and expr[i:i + len(op)] == op:
+                    return i
         return -1
 
     def _is_truthy(self, val) -> bool:
