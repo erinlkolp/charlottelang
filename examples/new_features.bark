@@ -1,0 +1,110 @@
+sniff ═══════════════════════════════════════════
+sniff  CharlotteLang v3.0 — New Features Demo
+sniff ═══════════════════════════════════════════
+
+sniff ── Imports ──────────────────────────────
+snag "helpers.bark"
+greet("World")
+fetch result = double(21)
+bark f"Double of 21 is {result}"
+bark ""
+
+sniff ── Dictionaries ────────────────────────
+bark "--- Dictionaries (collar) ---"
+
+fetch dog = collar{"name": "Charlotte", "breed": "Chihuahua", "age": 5}
+bark f"Name: {dog["name"]}"
+bark f"Breed: {dog["breed"]}"
+bark f"Age: {dog["age"]}"
+
+sniff Add a new key
+dog.bury("color", "tan")
+bark f"Color: {dog["color"]}"
+
+sniff Check key count
+bark f"Dog has {dog.toys} attributes"
+
+sniff Check membership
+sniff  "name" is a key in dog
+bark f"Has name? {"name" in dog}"
+
+sniff Iterate through dict keys
+bark "All attributes:"
+zoomies through dog:
+  bark f"  {toy}: {dog[toy]}"
+
+sniff Get keys and values as lists
+fetch keys = dog.keys
+bark f"Keys: {keys}"
+
+sniff Delete a key
+dog.dig("color")
+bark f"After removing color: {dog.toys} attributes"
+
+sniff Dict indexing assignment
+dog["age"] = 6
+bark f"Updated age: {dog["age"]}"
+bark ""
+
+sniff ── Try/Catch ───────────────────────────
+bark "--- Try/Catch (careful/oops) ---"
+
+careful:
+  bark "Trying something risky..."
+  growl "Oh no, Charlotte ate the homework!"
+oops e:
+  bark f"Caught error: {e}"
+
+careful:
+  bark "This one works fine!"
+oops e:
+  bark "This won't print"
+bark ""
+
+sniff ── Continue (keep going) ───────────────
+bark "--- Continue (keep going) ---"
+bark "Skipping odd numbers:"
+zoomies 10 times:
+  sniff lap % 2 != 0:
+    keep going
+  bark f"  {lap}"
+bark ""
+
+sniff ── String Methods ──────────────────────
+bark "--- String Methods ---"
+
+fetch message = "  Hello, Charlotte!  "
+bark f"Original:  '{message}'"
+bark f"Trimmed:   '{message.trim()}'"
+
+fetch shout = "quiet please"
+bark f"Upper:     '{shout.upper()}'"
+
+fetch loud = "STOP BARKING"
+bark f"Lower:     '{loud.lower()}'"
+
+fetch csv = "one,two,three,four"
+fetch parts = csv.chew(",")
+bark f"Split:     {parts}"
+bark ""
+
+sniff ── Type Checking ───────────────────────
+bark "--- Type Checking (breed) ---"
+
+bark f"breed(42)          = {breed(42)}"
+bark f"breed(3.14)        = {breed(3.14)}"
+bark f"breed(\"hello\")     = {breed("hello")}"
+bark f"breed(loyal)       = {breed(loyal)}"
+bark f"breed(napping)     = {breed(napping)}"
+bark f"breed(bunny[1,2])  = {breed(bunny[1, 2])}"
+fetch d = collar{}
+bark f"breed(collar)      = {breed(d)}"
+bark ""
+
+sniff ── Int Conversion ──────────────────────
+bark "--- Int Conversion (goodBoy) ---"
+fetch pi = 3.14
+bark f"goodBoy(3.14) = {goodBoy(pi)}"
+bark ""
+
+bark "All new features working! *happy tail wag*"

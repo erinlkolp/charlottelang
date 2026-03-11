@@ -1,0 +1,7 @@
+sniff Helper functions for Charlotte programs
+
+teach trick double(n):
+  rollover n * 2
+
+teach trick greet(name):
+  bark f"Woof woof, {name}! Welcome to the pack!"
