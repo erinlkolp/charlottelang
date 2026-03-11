@@ -875,3 +875,187 @@ class TestIntegration:
         )
         out = run(code)
         assert out == ["2", "4", "6", "8", "10"]
+
+
+# ─── Escape Sequence Tests ──────────────────────────────────
+
+class TestEscapeSequences:
+    def test_newline_escape(self):
+        result = only('bark "hello\\nworld"')
+        assert result == "hello\nworld"
+
+    def test_tab_escape(self):
+        result = only('bark "a\\tb"')
+        assert result == "a\tb"
+
+    def test_backslash_escape(self):
+        result = only('bark "one\\\\two"')
+        assert result == "one\\two"
+
+    def test_escaped_quote(self):
+        result = only('bark "say \\"hello\\""')
+        assert result == 'say "hello"'
+
+    def test_escape_in_variable(self):
+        assert only('fetch s = "line1\\nline2"\nbark s') == "line1\nline2"
+
+    def test_escape_in_fstring(self):
+        result = only('fetch name = "Charlotte"\nbark f"Hello\\t{name}"')
+        assert result == "Hello\tCharlotte"
+
+    def test_no_escape_passthrough(self):
+        result = only('bark "\\q"')
+        assert result == "\\q"
+
+    def test_escape_affects_string_length(self):
+        assert only('fetch s = "a\\nb"\nbark howBig(s)') == "3"
+
+
+# ─── Negative Indexing Tests ────────────────────────────────
+
+class TestNegativeIndexing:
+    def test_list_negative_one(self):
+        assert only("fetch arr = bunny[10, 20, 30]\nbark arr[-1]") == "30"
+
+    def test_list_negative_two(self):
+        assert only("fetch arr = bunny[10, 20, 30]\nbark arr[-2]") == "20"
+
+    def test_string_negative_index(self):
+        assert only('fetch s = "hello"\nbark s[-1]') == "o"
+
+    def test_string_positive_index(self):
+        assert only('fetch s = "hello"\nbark s[0]') == "h"
+
+    def test_string_middle_index(self):
+        assert only('fetch s = "hello"\nbark s[2]') == "l"
+
+
+# ─── Slicing Tests ──────────────────────────────────────────
+
+class TestSlicing:
+    def test_list_slice_start_stop(self):
+        assert only("fetch arr = bunny[1, 2, 3, 4, 5]\nbark arr[1:3]") == "[2, 3]"
+
+    def test_list_slice_from_start(self):
+        assert only("fetch arr = bunny[1, 2, 3, 4, 5]\nbark arr[:2]") == "[1, 2]"
+
+    def test_list_slice_to_end(self):
+        assert only("fetch arr = bunny[1, 2, 3, 4, 5]\nbark arr[2:]") == "[3, 4, 5]"
+
+    def test_list_slice_negative(self):
+        assert only("fetch arr = bunny[1, 2, 3, 4, 5]\nbark arr[-2:]") == "[4, 5]"
+
+    def test_list_slice_with_step(self):
+        assert only("fetch arr = bunny[1, 2, 3, 4, 5]\nbark arr[::2]") == "[1, 3, 5]"
+
+    def test_list_slice_full_copy(self):
+        assert only("fetch arr = bunny[1, 2, 3]\nbark arr[:]") == "[1, 2, 3]"
+
+    def test_string_slice(self):
+        assert only('fetch s = "hello world"\nbark s[0:5]') == "hello"
+
+    def test_string_slice_to_end(self):
+        assert only('fetch s = "hello world"\nbark s[6:]') == "world"
+
+    def test_string_slice_negative(self):
+        assert only('fetch s = "hello"\nbark s[-3:]') == "llo"
+
+    def test_slice_length(self):
+        assert only("fetch arr = bunny[1, 2, 3, 4, 5]\nfetch s = arr[1:4]\nbark s.toys") == "3"
+
+
+# ─── New String Method Tests ────────────────────────────────
+
+class TestNewStringMethods:
+    def test_replace_basic(self):
+        assert only('fetch s = "hello world"\nbark s.replace("world", "Charlotte")') == "hello Charlotte"
+
+    def test_replace_all_occurrences(self):
+        assert only('fetch s = "aaa"\nbark s.replace("a", "b")') == "bbb"
+
+    def test_replace_not_found(self):
+        assert only('fetch s = "hello"\nbark s.replace("xyz", "abc")') == "hello"
+
+    def test_find_found(self):
+        assert only('fetch s = "hello world"\nbark s.find("world")') == "6"
+
+    def test_find_not_found(self):
+        assert only('fetch s = "hello"\nbark s.find("xyz")') == "-1"
+
+    def test_find_from_start(self):
+        assert only('fetch s = "abcabc"\nbark s.find("b")') == "1"
+
+    def test_startswith_true(self):
+        assert only('fetch s = "hello world"\nbark s.startswith("hello")') == "True"
+
+    def test_startswith_false(self):
+        assert only('fetch s = "hello world"\nbark s.startswith("world")') == "False"
+
+    def test_endswith_true(self):
+        assert only('fetch s = "hello world"\nbark s.endswith("world")') == "True"
+
+    def test_endswith_false(self):
+        assert only('fetch s = "hello world"\nbark s.endswith("hello")') == "False"
+
+
+# ─── New List Method Tests ──────────────────────────────────
+
+class TestNewListMethods:
+    def test_join_comma(self):
+        assert only('fetch arr = bunny["a", "b", "c"]\nbark arr.join(",")') == "a,b,c"
+
+    def test_join_space(self):
+        assert only('fetch arr = bunny["hello", "world"]\nbark arr.join(" ")') == "hello world"
+
+    def test_join_empty_sep(self):
+        assert only('fetch arr = bunny["a", "b", "c"]\nbark arr.join("")') == "abc"
+
+    def test_join_numbers(self):
+        assert only("fetch arr = bunny[1, 2, 3]\nbark arr.join(\"-\")") == "1-2-3"
+
+    def test_index_found(self):
+        assert only("fetch arr = bunny[10, 20, 30]\nbark arr.index(20)") == "1"
+
+    def test_index_first_occurrence(self):
+        assert only("fetch arr = bunny[1, 2, 1, 2]\nbark arr.index(2)") == "1"
+
+    def test_index_not_found(self):
+        assert only("fetch arr = bunny[1, 2, 3]\nbark arr.index(99)") == "-1"
+
+    def test_pop_last(self):
+        assert only("fetch arr = bunny[1, 2, 3]\nfetch x = arr.pop()\nbark x") == "3"
+
+    def test_pop_last_removes(self):
+        assert only("fetch arr = bunny[1, 2, 3]\narr.pop()\nbark arr.toys") == "2"
+
+    def test_pop_index(self):
+        assert only("fetch arr = bunny[10, 20, 30]\nfetch x = arr.pop(1)\nbark x") == "20"
+
+    def test_pop_index_removes(self):
+        assert only("fetch arr = bunny[10, 20, 30]\narr.pop(0)\nbark arr[0]") == "20"
+
+    def test_pop_empty_error(self):
+        errors = run_errors("fetch arr = bunny[]\narr.pop()")
+        assert len(errors) == 1
+
+    def test_sort_numbers(self):
+        assert only("fetch arr = bunny[3, 1, 4, 1, 5, 2]\narr.sort()\nbark arr[0]") == "1"
+
+    def test_sort_is_inplace(self):
+        out = run("fetch arr = bunny[3, 1, 2]\narr.sort()\nzoomies through arr:\n  bark toy")
+        assert out == ["1", "2", "3"]
+
+    def test_reverse_inplace(self):
+        out = run("fetch arr = bunny[1, 2, 3]\narr.reverse()\nzoomies through arr:\n  bark toy")
+        assert out == ["3", "2", "1"]
+
+    def test_remove_first_occurrence(self):
+        out = run("fetch arr = bunny[1, 2, 1, 2]\narr.remove(1)\nzoomies through arr:\n  bark toy")
+        assert out == ["2", "1", "2"]
+
+    def test_remove_missing_no_error(self):
+        errors = run_errors("fetch arr = bunny[1, 2, 3]\narr.remove(99)")
+        assert errors == []
+
+    def test_remove_shrinks_list(self):
+        assert only("fetch arr = bunny[1, 2, 3]\narr.remove(2)\nbark arr.toys") == "2"

@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v3.0
+# 🐕 CharlotteLang v4.0
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -64,6 +64,23 @@ charlotte run hello.bark
 | `loyal` / `stranger` | `True` / `False` | Booleans |
 | `napping` | `None` | Null value |
 | `f"hi {name}"` | `f"hi {name}"` | F-string interpolation |
+| `"line1\nline2"` | `"line1\nline2"` | Escape sequences (`\n` `\t` `\\` `\"`) |
+
+### Arrays (Lists)
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `bunny[1, 2, 3]` | `[1, 2, 3]` | Array literal |
+| `arr[0]` | `arr[0]` | Index access |
+| `arr[-1]` | `arr[-1]` | Negative index (last element) |
+| `arr[1:3]` | `arr[1:3]` | Slice `[start:stop:step]` |
+| `arr.toys` | `len(arr)` | Length |
+| `arr.give(val)` | `arr.append(val)` | Append |
+| `arr.pop()` / `arr.pop(idx)` | `arr.pop()` | Remove and return element |
+| `arr.sort()` | `arr.sort()` | Sort in-place |
+| `arr.reverse()` | `arr.reverse()` | Reverse in-place |
+| `arr.remove(val)` | `arr.remove(val)` | Remove first occurrence |
+| `arr.index(val)` | `arr.index(val)` | Find position (-1 if missing) |
+| `arr.join(",")` | `",".join(arr)` | Join elements to string |
 
 ### Dictionaries
 | Charlotte | Python | Description |
@@ -150,6 +167,10 @@ snag "helpers.bark"
 | `s.trim()` | `s.strip()` | Remove leading/trailing whitespace |
 | `s.upper()` | `s.upper()` | Convert to uppercase |
 | `s.lower()` | `s.lower()` | Convert to lowercase |
+| `s.replace("a","b")` | `s.replace("a","b")` | Replace occurrences |
+| `s.find("sub")` | `s.find("sub")` | Find position (-1 if missing) |
+| `s.startswith("x")` | `s.startswith("x")` | Check prefix (returns boolean) |
+| `s.endswith("x")` | `s.endswith("x")` | Check suffix (returns boolean) |
 
 ### Comments
 ```

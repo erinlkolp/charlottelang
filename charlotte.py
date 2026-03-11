@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CharlotteLang Interpreter v3.0
+CharlotteLang Interpreter v4.0
 A Pythonic programming language with chihuahua soul and pitbull energy.
 
 Usage:
@@ -252,6 +252,42 @@ class Interpreter:
                     i += 1
                     continue
 
+            # ── .sort() (list sort in-place) ──
+            if text.endswith(".sort()"):
+                name = text[:-7]
+                if name in self.variables and isinstance(self.variables[name], list):
+                    self.variables[name].sort()
+                    i += 1
+                    continue
+
+            # ── .reverse() (list reverse in-place) ──
+            if text.endswith(".reverse()"):
+                name = text[:-10]
+                if name in self.variables and isinstance(self.variables[name], list):
+                    self.variables[name].reverse()
+                    i += 1
+                    continue
+
+            # ── .remove(val) (remove first occurrence from list) ──
+            if ".remove(" in text and text.endswith(")"):
+                dot_pos = text.index(".remove(")
+                arr_name = text[:dot_pos]
+                if arr_name in self.variables and isinstance(self.variables[arr_name], list):
+                    val = self._evaluate(text[dot_pos + 8:-1], ln)
+                    if val in self.variables[arr_name]:
+                        self.variables[arr_name].remove(val)
+                    i += 1
+                    continue
+
+            # ── .pop() as statement (result discarded) ──
+            if ".pop(" in text and text.endswith(")"):
+                dot_pos = text.index(".pop(")
+                arr_name = text[:dot_pos]
+                if arr_name in self.variables and isinstance(self.variables[arr_name], list):
+                    self._evaluate(text, ln)
+                    i += 1
+                    continue
+
             # ── function call ──
             if "(" in text and text.endswith(")"):
                 paren_pos = text.index("(")
@@ -495,6 +531,23 @@ class Interpreter:
 
     # ── Expression evaluator ──
 
+    def _process_escapes(self, s: str) -> str:
+        """Process escape sequences in string literals."""
+        escape_map = {
+            'n': '\n', 't': '\t', 'r': '\r', '\\': '\\',
+            '"': '"', "'": "'", '0': '\0', 'b': '\b', 'f': '\f',
+        }
+        result = []
+        i = 0
+        while i < len(s):
+            if s[i] == '\\' and i + 1 < len(s):
+                result.append(escape_map.get(s[i + 1], '\\' + s[i + 1]))
+                i += 2
+            else:
+                result.append(s[i])
+                i += 1
+        return ''.join(result)
+
     def _is_complete_string(self, expr: str) -> bool:
         """Check if expr is a single complete string literal (not two strings joined by an op)."""
         if len(expr) < 2:
@@ -539,11 +592,11 @@ class Interpreter:
 
         # String literals — must be a single complete string, not "a" + "b"
         if self._is_complete_string(expr):
-            return expr[1:-1]
+            return self._process_escapes(expr[1:-1])
 
         # f-strings
         if expr.startswith('f"') and expr.endswith('"'):
-            inner = expr[2:-1]
+            inner = self._process_escapes(expr[2:-1])
             def replace_expr(m):
                 return str(self._evaluate(m.group(1).strip(), ln))
             return re.sub(r"\{([^}]+)\}", replace_expr, inner)
@@ -591,14 +644,25 @@ class Interpreter:
         if expr.startswith("(") and expr.endswith(")"):
             return self._evaluate(expr[1:-1], ln)
 
-        # Indexing: name[idx] for lists and dicts
+        # Indexing and slicing: name[idx], name[start:stop], name[start:stop:step]
         if "[" in expr and expr.endswith("]") and not expr.startswith("bunny[") and not expr.startswith("collar{"):
             bracket_pos = expr.index("[")
             name = expr[:bracket_pos]
             if name in self.variables:
-                key = self._evaluate(expr[bracket_pos + 1:-1], ln)
+                key_expr = expr[bracket_pos + 1:-1]
                 container = self.variables[name]
+                if ":" in key_expr:
+                    parts = key_expr.split(":", 2)
+                    start = int(self._evaluate(parts[0].strip(), ln)) if parts[0].strip() else None
+                    stop = int(self._evaluate(parts[1].strip(), ln)) if parts[1].strip() else None
+                    step = int(self._evaluate(parts[2].strip(), ln)) if len(parts) > 2 and parts[2].strip() else None
+                    if isinstance(container, (list, str)):
+                        return container[start:stop:step]
+                    raise CharlotteError("Can only slice a bunny (array) or string!", ln)
+                key = self._evaluate(key_expr, ln)
                 if isinstance(container, list):
+                    return container[int(key)]
+                if isinstance(container, str):
                     return container[int(key)]
                 if isinstance(container, dict):
                     if key not in container:
@@ -653,6 +717,73 @@ class Interpreter:
             name = expr[:-8]
             if name in self.variables and isinstance(self.variables[name], str):
                 return self.variables[name].lower()
+
+        # .replace(old, new) — replace all occurrences in a string
+        if ".replace(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".replace(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], str):
+                args = self._parse_args(expr[dot_pos + 9:-1])
+                if len(args) == 2:
+                    old = self._evaluate(args[0].strip(), ln)
+                    new = self._evaluate(args[1].strip(), ln)
+                    return self.variables[name].replace(str(old), str(new))
+
+        # .find(sub) — find index of substring, -1 if not found
+        if ".find(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".find(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], str):
+                sub = self._evaluate(expr[dot_pos + 6:-1], ln)
+                return self.variables[name].find(str(sub))
+
+        # .startswith(prefix) — check if string starts with prefix
+        if ".startswith(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".startswith(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], str):
+                prefix = self._evaluate(expr[dot_pos + 12:-1], ln)
+                return self.variables[name].startswith(str(prefix))
+
+        # .endswith(suffix) — check if string ends with suffix
+        if ".endswith(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".endswith(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], str):
+                suffix = self._evaluate(expr[dot_pos + 10:-1], ln)
+                return self.variables[name].endswith(str(suffix))
+
+        # .join(sep) — join list elements with a separator string
+        if ".join(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".join(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], list):
+                sep = self._evaluate(expr[dot_pos + 6:-1], ln)
+                return str(sep).join(str(item) for item in self.variables[name])
+
+        # .index(val) — find index of value in list, -1 if not found
+        if ".index(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".index(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], list):
+                val = self._evaluate(expr[dot_pos + 7:-1], ln)
+                try:
+                    return self.variables[name].index(val)
+                except ValueError:
+                    return -1
+
+        # .pop() / .pop(idx) — remove and return element from list
+        if ".pop(" in expr and expr.endswith(")"):
+            dot_pos = expr.index(".pop(")
+            name = expr[:dot_pos]
+            if name in self.variables and isinstance(self.variables[name], list):
+                idx_expr = expr[dot_pos + 5:-1].strip()
+                try:
+                    if idx_expr:
+                        return self.variables[name].pop(int(self._evaluate(idx_expr, ln)))
+                    return self.variables[name].pop()
+                except IndexError:
+                    raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
 
         # Logical NOT
         if expr.startswith("not "):
@@ -796,7 +927,7 @@ class Interpreter:
 
 def run_repl():
     """Interactive CharlotteLang REPL."""
-    print("🐕 CharlotteLang v3.0 REPL")
+    print("🐕 CharlotteLang v4.0 REPL")
     print("   Type Charlotte code below. Commands:")
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
@@ -889,15 +1020,28 @@ def print_quick_ref():
 │  shake off               → break                         │
 │  keep going              → continue                      │
 │  bunny[1, 2, 3]          → array literal                 │
+│  arr[-1]                 → last element (neg index)      │
+│  arr[1:3]                → slice [start:stop:step]       │
 │  collar{"a": 1, "b": 2}  → dictionary literal            │
 │  list.toys / dict.toys   → length                        │
 │  list.give("item")       → append                        │
+│  list.pop() / .pop(idx)  → remove and return element     │
+│  list.sort()             → sort in-place                 │
+│  list.reverse()          → reverse in-place              │
+│  list.remove(val)        → remove first occurrence       │
+│  list.index(val)         → find position (-1 if missing) │
+│  list.join(",")          → join to string                │
 │  dict.bury("key", val)   → set key                       │
 │  dict.dig("key")         → delete key                    │
 │  dict.keys / dict.values → keys/values as list           │
 │  str.chew(" ")           → split string                  │
+│  str.replace(old, new)   → replace substring             │
+│  str.find("sub")         → find index (-1 if missing)    │
+│  str.startswith("pre")   → bool                          │
+│  str.endswith("suf")     → bool                          │
 │  str.trim()              → strip whitespace              │
 │  str.upper() / .lower()  → case conversion               │
+│  "hello\nworld"          → escape sequences (\n\t\\\")   │
 │  loyal / stranger        → true / false                  │
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
@@ -921,7 +1065,7 @@ def print_quick_ref():
 
 def main():
     if len(sys.argv) < 2:
-        print("🐕 CharlotteLang v3.0")
+        print("🐕 CharlotteLang v4.0")
         print()
         print("Usage:")
         print("  charlotte run <file.bark>   Run a .bark file")
