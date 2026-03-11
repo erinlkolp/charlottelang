@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v2.0
+# 🐕 CharlotteLang v4.0
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -58,11 +58,43 @@ charlotte run hello.bark
 | `fetch x = 10` | `x = 10` | Create a variable |
 | `x = 20` | `x = 20` | Reassign |
 | `bunny[1, 2, 3]` | `[1, 2, 3]` | Array literal |
-| `list.toys` | `len(list)` | Length |
-| `list.give("item")` | `list.append("item")` | Append |
+| `collar{"a": 1, "b": 2}` | `{"a": 1, "b": 2}` | Dictionary literal |
+| `list.toys` | `len(list)` | Length (lists, strings, dicts) |
+| `list.give("item")` | `list.append("item")` | Append to list |
 | `loyal` / `stranger` | `True` / `False` | Booleans |
 | `napping` | `None` | Null value |
 | `f"hi {name}"` | `f"hi {name}"` | F-string interpolation |
+| `"line1\nline2"` | `"line1\nline2"` | Escape sequences (`\n` `\t` `\\` `\"`) |
+
+### Arrays (Lists)
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `bunny[1, 2, 3]` | `[1, 2, 3]` | Array literal |
+| `arr[0]` | `arr[0]` | Index access |
+| `arr[-1]` | `arr[-1]` | Negative index (last element) |
+| `arr[1:3]` | `arr[1:3]` | Slice `[start:stop:step]` |
+| `arr.toys` | `len(arr)` | Length |
+| `arr.give(val)` | `arr.append(val)` | Append |
+| `arr.pop()` / `arr.pop(idx)` | `arr.pop()` | Remove and return element |
+| `arr.sort()` | `arr.sort()` | Sort in-place |
+| `arr.reverse()` | `arr.reverse()` | Reverse in-place |
+| `arr.remove(val)` | `arr.remove(val)` | Remove first occurrence |
+| `arr.index(val)` | `arr.index(val)` | Find position (-1 if missing) |
+| `arr.join(",")` | `",".join(arr)` | Join elements to string |
+
+### Dictionaries
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `collar{"a": 1}` | `{"a": 1}` | Dictionary literal |
+| `collar{}` | `{}` | Empty dictionary |
+| `d["key"]` | `d["key"]` | Access value by key |
+| `d["key"] = val` | `d["key"] = val` | Set value by key |
+| `d.bury("key", val)` | `d["key"] = val` | Set value (method) |
+| `d.dig("key")` | `del d["key"]` | Remove key |
+| `d.keys` | `list(d.keys())` | Get keys as list |
+| `d.values` | `list(d.values())` | Get values as list |
+| `d.toys` | `len(d)` | Number of entries |
+| `"key" in d` | `"key" in d` | Check key existence |
 
 ### Control Flow
 | Charlotte | Python | Description |
@@ -74,12 +106,38 @@ charlotte run hello.bark
 | `zoomies through list:` | `for toy in list:` | For-each (`toy` = item, `lap` = index) |
 | `zoomies while x > 0:` | `while x > 0:` | While loop |
 | `shake off` | `break` | Break out of loop |
+| `keep going` | `continue` | Skip to next iteration |
 
 ### Functions
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
 | `teach trick greet(who):` | `def greet(who):` | Define function |
 | `rollover value` | `return value` | Return from function |
+
+### Error Handling
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `careful:` | `try:` | Start try block |
+| `oops e:` | `except Exception as e:` | Catch errors (e = error message) |
+| `oops:` | `except:` | Catch errors (no variable) |
+
+```
+careful:
+  growl "something went wrong!"
+oops e:
+  bark f"Caught: {e}"
+```
+
+### Imports
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `snag "helpers.bark"` | `import helpers` | Import and execute another .bark file |
+
+Imports are resolved relative to the current file. Circular imports are automatically prevented.
+
+```
+snag "helpers.bark"
+```
 
 ### Operators
 | Charlotte | Python | Description |
@@ -90,8 +148,29 @@ charlotte run hello.bark
 | `a is bigger than b` | `a > b` | Greater than |
 | `a is smaller than b` | `a < b` | Less than |
 | `and` / `or` / `not` | `and` / `or` / `not` | Logical operators |
-| `item in list` | `item in list` | Membership test |
+| `item in list` | `item in list` | Membership test (lists, dicts, strings) |
 | `+ - * / // %` | `+ - * / // %` | Arithmetic |
+
+### Built-in Functions
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `howBig(x)` | `len(x)` | Length of list, string, or dict |
+| `treat(x)` | `float(x)` | Convert to float |
+| `goodBoy(x)` | `int(x)` | Convert to integer |
+| `yap(x)` | `str(x)` | Convert to string |
+| `breed(x)` | `type(x).__name__` | Get type name (`"number"`, `"string"`, `"bunny"`, `"collar"`, `"boolean"`, `"napping"`) |
+
+### String Methods
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `s.chew(",")` | `s.split(",")` | Split string into list |
+| `s.trim()` | `s.strip()` | Remove leading/trailing whitespace |
+| `s.upper()` | `s.upper()` | Convert to uppercase |
+| `s.lower()` | `s.lower()` | Convert to lowercase |
+| `s.replace("a","b")` | `s.replace("a","b")` | Replace occurrences |
+| `s.find("sub")` | `s.find("sub")` | Find position (-1 if missing) |
+| `s.startswith("x")` | `s.startswith("x")` | Check prefix (returns boolean) |
+| `s.endswith("x")` | `s.endswith("x")` | Check suffix (returns boolean) |
 
 ### Comments
 ```
@@ -108,7 +187,7 @@ charlotte repl
 
 REPL commands:
 - `.run` — execute the buffer
-- `.clear` — clear the buffer  
+- `.clear` — clear the buffer
 - `.show` — show the buffer
 - `.help` — quick reference card
 - `.exit` — leave the REPL
@@ -121,6 +200,8 @@ See the `examples/` directory:
 - `hello.bark` — Hello World basics
 - `fizzbuzz.bark` — FizzBuzz, Charlotte-style
 - `full_day.bark` — A full day in Charlotte's life
+- `new_features.bark` — Demo of v3.0 features (dicts, try/catch, imports, string methods, etc.)
+- `helpers.bark` — Helper library used by new_features.bark (demonstrates imports)
 
 ## The Philosophy
 
