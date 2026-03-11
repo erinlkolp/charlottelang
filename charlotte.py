@@ -12,6 +12,8 @@ Usage:
 import sys
 import os
 import re
+import random
+import time
 
 
 class CharlotteError(Exception):
@@ -290,6 +292,12 @@ class Interpreter:
                     self._evaluate(text, ln)
                     i += 1
                     continue
+
+            # ── nap() as a standalone statement ──
+            if text.startswith("nap(") and text.endswith(")"):
+                self._evaluate(text, ln)
+                i += 1
+                continue
 
             # ── function call ──
             if "(" in text and text.endswith(")"):
@@ -891,6 +899,28 @@ class Interpreter:
         if expr.startswith("goodBoy(") and expr.endswith(")"):
             return int(self._evaluate(expr[8:-1], ln))
 
+        # squirrel() — random number; squirrel() → float, squirrel(n) → int 0..n-1, squirrel(a,b) → int a..b
+        if expr.startswith("squirrel(") and expr.endswith(")"):
+            raw = expr[9:-1].strip()
+            if not raw:
+                return random.random()
+            args = self._parse_args(raw)
+            if len(args) == 1:
+                return random.randrange(int(self._evaluate(args[0].strip(), ln)))
+            a = int(self._evaluate(args[0].strip(), ln))
+            b = int(self._evaluate(args[1].strip(), ln))
+            return random.randint(a, b)
+
+        # nap(seconds) — sleep
+        if expr.startswith("nap(") and expr.endswith(")"):
+            time.sleep(float(self._evaluate(expr[4:-1], ln)))
+            return None
+
+        # sniff_env(var) — get environment variable, returns napping if not set
+        if expr.startswith("sniff_env(") and expr.endswith(")"):
+            var = self._evaluate(expr[10:-1], ln)
+            return os.environ.get(str(var), None)
+
         # User function call
         if "(" in expr and expr.endswith(")"):
             paren_pos = expr.index("(")
@@ -1058,6 +1088,11 @@ def print_quick_ref():
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
 │  goodBoy(x)              → convert to int                │
+│  squirrel()              → random float 0.0–1.0          │
+│  squirrel(n)             → random int 0..n-1             │
+│  squirrel(a, b)          → random int a..b (inclusive)   │
+│  nap(seconds)            → sleep                         │
+│  sniff_env("VAR")        → get env variable or napping   │
 │  woof this is a comment  → comment (always)              │
 │  sniff this is ignored   → comment (only without colon)  │
 │  a ~ b                   → string concat                 │
