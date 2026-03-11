@@ -61,7 +61,10 @@ def parse_lines(source: str) -> list[Line]:
         if not stripped:
             continue
         trimmed = stripped.lstrip()
-        # Comments: bare "sniff" lines without a trailing colon
+        # Dedicated comment prefix: "woof" is always a comment regardless of content
+        if trimmed == "woof" or trimmed.startswith("woof ") or trimmed.startswith("woof\t"):
+            continue
+        # Legacy comment: bare "sniff" lines without a trailing colon
         if trimmed.startswith("sniff ") and not trimmed.endswith(":"):
             continue
         if trimmed == "sniff":
@@ -503,13 +506,22 @@ class Interpreter:
         return None
 
     def _parse_args(self, arg_str: str) -> list[str]:
-        """Split arguments respecting parentheses, brackets, and braces."""
+        """Split arguments respecting parentheses, brackets, braces, and strings."""
         args = []
         depth = 0
         current = ""
         in_string = False
         string_char = None
+        escaped = False
         for ch in arg_str:
+            if escaped:
+                escaped = False
+                current += ch
+                continue
+            if ch == "\\" and in_string:
+                escaped = True
+                current += ch
+                continue
             if not in_string and ch in ('"', "'"):
                 in_string = True
                 string_char = ch
@@ -1046,7 +1058,8 @@ def print_quick_ref():
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
 │  goodBoy(x)              → convert to int                │
-│  sniff this is ignored   → comment                       │
+│  woof this is a comment  → comment (always)              │
+│  sniff this is ignored   → comment (only without colon)  │
 │  a ~ b                   → string concat                 │
 │  and / or / not / in     → logical ops                   │
 │  + - * / // %            → arithmetic                    │
