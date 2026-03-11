@@ -616,10 +616,54 @@ class Interpreter:
 
         # f-strings
         if expr.startswith('f"') and expr.endswith('"'):
-            inner = self._process_escapes(expr[2:-1])
-            def replace_expr(m):
-                return str(self._evaluate(m.group(1).strip(), ln))
-            return re.sub(r"\{([^}]+)\}", replace_expr, inner)
+            inner = expr[2:-1]
+            result = []
+            i = 0
+            while i < len(inner):
+                ch = inner[i]
+                if ch == '{' and i + 1 < len(inner) and inner[i + 1] == '{':
+                    result.append('{')
+                    i += 2
+                elif ch == '}' and i + 1 < len(inner) and inner[i + 1] == '}':
+                    result.append('}')
+                    i += 2
+                elif ch == '{':
+                    i += 1
+                    depth = 1
+                    expr_chars = []
+                    in_str = None
+                    while i < len(inner) and depth > 0:
+                        c = inner[i]
+                        if in_str:
+                            if c == '\\' and i + 1 < len(inner):
+                                expr_chars.append(c)
+                                expr_chars.append(inner[i + 1])
+                                i += 2
+                                continue
+                            if c == in_str:
+                                in_str = None
+                        elif c in ('"', "'"):
+                            in_str = c
+                        elif c == '{':
+                            depth += 1
+                        elif c == '}':
+                            depth -= 1
+                            if depth == 0:
+                                break
+                        expr_chars.append(c)
+                        i += 1
+                    i += 1  # skip closing }
+                    val = self._evaluate(self._process_escapes(''.join(expr_chars).strip()), ln)
+                    result.append(str(val))
+                elif ch == '\\' and i + 1 < len(inner):
+                    escape_map = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\',
+                                  '"': '"', "'": "'", '0': '\0', 'b': '\b', 'f': '\f'}
+                    result.append(escape_map.get(inner[i + 1], '\\' + inner[i + 1]))
+                    i += 2
+                else:
+                    result.append(ch)
+                    i += 1
+            return ''.join(result)
 
         # Bunny (array) literal
         if expr.startswith("bunny[") and expr.endswith("]"):

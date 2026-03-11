@@ -1272,3 +1272,46 @@ class TestExamples:
     def test_new_features_try_catch(self):
         out = self._run_file("new_features.bark")
         assert any("Caught error" in line for line in out)
+
+
+# ─── F-string brace-depth tests (fix #18) ───────────────────
+
+class TestFStringBraceDepth:
+    """The old regex [^}]+ broke on any } inside {…} expressions."""
+
+    def test_dict_string_key_in_fstring(self):
+        # d["key"] — no } in expression but validates the new parser
+        src = 'fetch d = collar{"k": "v"}\nbark f"val={d["k"]}"'
+        assert only(src) == "val=v"
+
+    def test_collar_literal_in_fstring(self):
+        # collar{…} has } inside the expression — old regex [^}]+ broke here
+        src = 'bark f"type: {breed(collar{"a": 99})}"'
+        assert only(src) == "type: collar"
+
+    def test_nested_fstring(self):
+        src = 'fetch name = "Charlotte"\nbark f"hi {f"dear {name}"}!"'
+        assert only(src) == "hi dear Charlotte!"
+
+    def test_double_brace_literal_open(self):
+        assert only('bark f"{{open"') == "{open"
+
+    def test_double_brace_literal_close(self):
+        assert only('bark f"close}}"') == "close}"
+
+    def test_double_brace_both(self):
+        assert only('bark f"{{literal}}"') == "{literal}"
+
+    def test_multiple_expressions(self):
+        src = 'fetch a = 1\nfetch b = 2\nbark f"{a} + {b} = {a + b}"'
+        assert only(src) == "1 + 2 = 3"
+
+    def test_expression_with_method_call(self):
+        src = 'fetch s = "hello world"\nfetch parts = s.chew(" ")\nbark f"words: {parts.toys}"'
+        assert only(src) == "words: 2"
+
+    def test_arithmetic_in_fstring(self):
+        assert only('fetch x = 7\nbark f"double: {x * 2}"') == "double: 14"
+
+    def test_fstring_no_expressions(self):
+        assert only('bark f"just text"') == "just text"
