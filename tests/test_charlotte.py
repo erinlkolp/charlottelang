@@ -1059,3 +1059,216 @@ class TestNewListMethods:
 
     def test_remove_shrinks_list(self):
         assert only("fetch arr = bunny[1, 2, 3]\narr.remove(2)\nbark arr.toys") == "2"
+
+
+# ─── Woof Comment Tests (fix #1) ────────────────────────────
+
+class TestWoofComments:
+    """woof is always a comment regardless of content; sniff without colon is legacy comment."""
+
+    def test_woof_basic(self):
+        assert only('woof this is a comment\nbark "hi"') == "hi"
+
+    def test_woof_bare(self):
+        assert only('woof\nbark "hi"') == "hi"
+
+    def test_woof_with_trailing_colon(self):
+        # The bug: a comment ending in ":" was treated as an if-statement
+        assert only('woof this ends with a colon:\nbark "hi"') == "hi"
+
+    def test_woof_many_colons(self):
+        assert only('woof key: value: more: stuff:\nbark "hi"') == "hi"
+
+    def test_woof_indented(self):
+        out = run('sniff loyal:\n  woof indented comment:\n  bark "yes"')
+        assert out == ["yes"]
+
+    def test_woof_does_not_execute(self):
+        # Content after woof is never evaluated
+        out = run('woof bark "should not print"\nbark "only this"')
+        assert out == ["only this"]
+
+    def test_sniff_legacy_comment_no_colon(self):
+        assert only('sniff this is a legacy comment\nbark "hi"') == "hi"
+
+    def test_sniff_if_colon_still_works(self):
+        assert only('sniff loyal:\n  bark "yes"') == "yes"
+
+    def test_sniff_comment_before_if(self):
+        out = run('sniff a comment here\nsniff loyal:\n  bark "yes"')
+        assert out == ["yes"]
+
+    def test_multiple_woof_comments(self):
+        out = run('woof first\nwoof second\nwoof third\nbark "result"')
+        assert out == ["result"]
+
+
+# ─── Escaped Quote Arg Parsing Tests (fix #4) ───────────────
+
+class TestEscapedQuoteArgs:
+    """_parse_args must not end string tracking on backslash-escaped quotes."""
+
+    def test_escaped_quote_in_single_arg(self):
+        code = 'teach trick echo(s):\n  rollover s\nfetch r = echo("say \\"hi\\"")\nbark r'
+        assert only(code) == 'say "hi"'
+
+    def test_comma_inside_string_arg_not_split(self):
+        code = 'teach trick echo(s):\n  rollover s\nfetch r = echo("hello, world")\nbark r'
+        assert only(code) == "hello, world"
+
+    def test_escaped_quote_then_real_comma(self):
+        code = (
+            'teach trick pair(a, b):\n'
+            '  bark a\n'
+            '  bark b\n'
+            'pair("say \\"hi\\"", "bye")'
+        )
+        out = run(code)
+        assert out == ['say "hi"', "bye"]
+
+    def test_nested_function_call_as_arg(self):
+        code = (
+            'teach trick add(a, b):\n'
+            '  rollover a + b\n'
+            'teach trick double(n):\n'
+            '  rollover n * 2\n'
+            'bark add(double(3), double(4))'
+        )
+        assert only(code) == "14"
+
+    def test_bunny_literal_as_arg(self):
+        code = (
+            'teach trick first(arr):\n'
+            '  rollover arr[0]\n'
+            'bark first(bunny[99, 2, 3])'
+        )
+        assert only(code) == "99"
+
+
+# ─── New Built-in Tests (squirrel, nap, sniff_env) ──────────
+
+class TestNewBuiltins:
+    def test_squirrel_no_args_returns_float(self):
+        assert only('fetch r = squirrel()\nbark breed(r)') == "number"
+
+    def test_squirrel_no_args_in_range(self):
+        # Run 20 times; all results must be in [0, 1)
+        code = (
+            'zoomies 20 times:\n'
+            '  fetch r = squirrel()\n'
+            '  sniff r >= 0:\n'
+            '    sniff r is smaller than 1:\n'
+            '      bark "ok"'
+        )
+        out = run(code)
+        assert out == ["ok"] * 20
+
+    def test_squirrel_n_in_range(self):
+        code = (
+            'zoomies 20 times:\n'
+            '  fetch r = squirrel(10)\n'
+            '  sniff r >= 0:\n'
+            '    sniff r is smaller than 10:\n'
+            '      bark "ok"'
+        )
+        out = run(code)
+        assert out == ["ok"] * 20
+
+    def test_squirrel_ab_in_range(self):
+        code = (
+            'zoomies 20 times:\n'
+            '  fetch r = squirrel(5, 15)\n'
+            '  sniff r >= 5:\n'
+            '    sniff r <= 15:\n'
+            '      bark "ok"'
+        )
+        out = run(code)
+        assert out == ["ok"] * 20
+
+    def test_squirrel_returns_int_with_args(self):
+        assert only('fetch r = squirrel(100)\nbark breed(r)') == "number"
+
+    def test_nap_statement(self):
+        # nap as a standalone statement should not error
+        assert only('nap(0)\nbark "done"') == "done"
+
+    def test_nap_expression(self):
+        # nap used in fetch should return napping (None)
+        assert only('fetch r = nap(0)\nbark r') == "None"
+
+    def test_sniff_env_set(self):
+        import os
+        os.environ["CHARLOTTE_TEST_VAR"] = "chihuahua"
+        assert only('fetch v = sniff_env("CHARLOTTE_TEST_VAR")\nbark v') == "chihuahua"
+        del os.environ["CHARLOTTE_TEST_VAR"]
+
+    def test_sniff_env_unset_returns_null(self):
+        assert only('fetch v = sniff_env("__DEFINITELY_NOT_SET_XYZ__")\nbark v') == "None"
+
+    def test_sniff_env_unset_is_falsy(self):
+        out = run('fetch v = sniff_env("__DEFINITELY_NOT_SET_XYZ__")\nsniff v:\n  bark "set"\nelse pout:\n  bark "unset"')
+        assert out == ["unset"]
+
+
+# ─── Example File Tests ──────────────────────────────────────
+
+class TestExamples:
+    def _run_file(self, filename):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "examples", filename)
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        with open(path) as f:
+            source = f.read()
+        interp.run(source, source_path=path)
+        return outputs
+
+    def test_hello(self):
+        out = self._run_file("hello.bark")
+        assert out[0] == "Yap yap! Hello World! 🐾"
+        assert "Charlotte has 10 treats!" in out
+        assert "After sharing: 5 each 🦴" in out
+
+    def test_fizzbuzz_length(self):
+        out = self._run_file("fizzbuzz.bark")
+        assert len(out) == 20
+
+    def test_fizzbuzz_fizz(self):
+        out = self._run_file("fizzbuzz.bark")
+        assert out[2] == "3: 🐕 BARK! (Fizz)"
+
+    def test_fizzbuzz_buzz(self):
+        out = self._run_file("fizzbuzz.bark")
+        assert out[4] == "5: 💨 ZOOM! (Buzz)"
+
+    def test_fizzbuzz_fizzbuzz(self):
+        out = self._run_file("fizzbuzz.bark")
+        assert out[14] == "15: 🐕 BARK BUZZ! (FizzBuzz)"
+
+    def test_full_day_morning(self):
+        out = self._run_file("full_day.bark")
+        assert "🐕 BARK BARK BARK at mailman!!" in out
+
+    def test_full_day_mood(self):
+        out = self._run_file("full_day.bark")
+        assert "Charlotte is: ecstatic 🥰" in out
+
+    def test_full_day_evening(self):
+        out = self._run_file("full_day.bark")
+        assert "Scratch. My. Belly. Now. 👑" in out
+
+    def test_new_features_completes(self):
+        out = self._run_file("new_features.bark")
+        assert "All new features working! *happy tail wag*" in out
+
+    def test_new_features_imports(self):
+        out = self._run_file("new_features.bark")
+        assert "Woof woof, World! Welcome to the pack!" in out
+
+    def test_new_features_dict(self):
+        out = self._run_file("new_features.bark")
+        assert "Name: Charlotte" in out
+
+    def test_new_features_try_catch(self):
+        out = self._run_file("new_features.bark")
+        assert any("Caught error" in line for line in out)

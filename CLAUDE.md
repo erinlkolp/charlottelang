@@ -68,7 +68,21 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 
 ## Testing
 
-There is no automated test suite. To verify changes, run all example files:
+Run the full test suite with pytest (267 tests):
+
+```bash
+python -m pytest tests/
+```
+
+Or run a specific class:
+
+```bash
+python -m pytest tests/ -k TestLoops -v
+```
+
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`). Example files are also smoke-tested.
+
+To manually verify examples:
 
 ```bash
 python charlotte.py run examples/hello.bark
@@ -76,5 +90,3 @@ python charlotte.py run examples/fizzbuzz.bark
 python charlotte.py run examples/full_day.bark
 python charlotte.py run examples/new_features.bark
 ```
-
-All examples should produce output without errors.
