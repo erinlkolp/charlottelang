@@ -398,6 +398,52 @@ class TestLoops:
         assert len(errors) == 1
         assert "collapsed" in errors[0].lower() or "infinite" in errors[0].lower()
 
+    def test_zoomies_named_var_list(self):
+        out = run("fetch arr = bunny[10, 20, 30]\nzoomies item through arr:\n  bark item")
+        assert out == ["10", "20", "30"]
+
+    def test_zoomies_named_var_lap_index(self):
+        out = run("fetch arr = bunny[10, 20, 30]\nzoomies item through arr:\n  bark lap")
+        assert out == ["0", "1", "2"]
+
+    def test_zoomies_named_var_dict(self):
+        out = run('fetch d = collar{"x": 1, "y": 2}\nzoomies k through d:\n  bark k')
+        assert set(out) == {"x", "y"}
+
+    def test_zoomies_named_var_break(self):
+        out = run("fetch arr = bunny[1, 2, 3, 4, 5]\nzoomies n through arr:\n  sniff n equals 3:\n    shake off\n  bark n")
+        assert out == ["1", "2"]
+
+    def test_zoomies_named_var_continue(self):
+        out = run("fetch arr = bunny[1, 2, 3, 4, 5]\nzoomies n through arr:\n  sniff n % 2 equals 0:\n    keep going\n  bark n")
+        assert out == ["1", "3", "5"]
+
+    def test_zoomies_unnamed_backward_compat(self):
+        out = run("fetch arr = bunny[10, 20, 30]\nzoomies through arr:\n  bark toy")
+        assert out == ["10", "20", "30"]
+
+
+# ─── User Input Tests ────────────────────────────────────────
+
+class TestUserInput:
+    def test_beg_returns_string(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "charlotte")
+        assert only('fetch name = beg("Name: ")\nbark name') == "charlotte"
+
+    def test_beg_empty_prompt(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "woof")
+        assert only('fetch r = beg("")\nbark r') == "woof"
+
+    def test_beg_used_in_expression(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "5")
+        assert only('fetch n = goodBoy(beg("Enter: "))\nbark n + 1') == "6"
+
+    def test_beg_prompt_is_evaluated(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr("builtins.input", lambda prompt="": captured.append(prompt) or "hi")
+        run('fetch label = "say something: "\nfetch r = beg(label)')
+        assert captured == ["say something: "]
+
 
 # ─── Function Tests ─────────────────────────────────────────
 

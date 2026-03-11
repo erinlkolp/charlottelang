@@ -56,6 +56,8 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `squirrel()` | random number |
 | `nap(s)` | sleep |
 | `sniff_env(v)` | get environment variable |
+| `beg(prompt)` | read user input from stdin (returns string) |
+| `zoomies VAR through` | named foreach — `VAR` holds each item, `lap` holds index |
 
 ## Code Conventions
 
@@ -80,7 +82,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`). Example files are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`). Example files are also smoke-tested.
 
 To manually verify examples:
 

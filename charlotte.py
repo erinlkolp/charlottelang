@@ -183,6 +183,11 @@ class Interpreter:
                 i = self._handle_foreach(text, lines, i, indent, ln)
                 continue
 
+            # ── zoomies VAR through: (named for-each with custom loop variable) ──
+            if re.match(r"^zoomies \w+ through .+:$", text):
+                i = self._handle_foreach_named(text, lines, i, indent, ln)
+                continue
+
             # ── zoomies while: (while-loop) ──
             if text.startswith("zoomies while ") and text.endswith(":"):
                 i = self._handle_while(text, lines, i, indent, ln)
@@ -371,6 +376,37 @@ class Interpreter:
         for z, item in enumerate(arr):
             self.variables["lap"] = z
             self.variables["toy"] = item
+            try:
+                self._execute_block(block)
+            except CharlotteBreak:
+                break
+            except CharlotteContinue:
+                continue
+        return next_idx
+
+    def _handle_foreach_named(self, text, lines, i, indent, ln):
+        match = re.match(r"^zoomies (\w+) through (.+):$", text)
+        var_name = match.group(1)
+        arr_expr = match.group(2).strip()
+        arr = self._evaluate(arr_expr, ln)
+        if isinstance(arr, dict):
+            block, next_idx = self._get_block(lines, i + 1, indent)
+            for z, key in enumerate(arr):
+                self.variables["lap"] = z
+                self.variables[var_name] = key
+                try:
+                    self._execute_block(block)
+                except CharlotteBreak:
+                    break
+                except CharlotteContinue:
+                    continue
+            return next_idx
+        if not isinstance(arr, list):
+            raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
+        block, next_idx = self._get_block(lines, i + 1, indent)
+        for z, item in enumerate(arr):
+            self.variables["lap"] = z
+            self.variables[var_name] = item
             try:
                 self._execute_block(block)
             except CharlotteBreak:
@@ -965,6 +1001,11 @@ class Interpreter:
             var = self._evaluate(expr[10:-1], ln)
             return os.environ.get(str(var), None)
 
+        # beg(prompt) — read user input from stdin, returns string
+        if expr.startswith("beg(") and expr.endswith(")"):
+            prompt_val = self._evaluate(expr[4:-1], ln)
+            return input(str(prompt_val))
+
         # User function call
         if "(" in expr and expr.endswith(")"):
             paren_pos = expr.index("(")
@@ -1095,6 +1136,8 @@ def print_quick_ref():
 │                                                          │
 │  zoomies through toys:   → foreach (toy=item, lap=idx)   │
 │    bark toy                                              │
+│  zoomies item through toys: → named foreach (lap=idx)    │
+│    bark item                                             │
 │                                                          │
 │  zoomies while x > 0:    → while loop                    │
 │    x = x - 1                                             │
@@ -1132,6 +1175,7 @@ def print_quick_ref():
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
 │  goodBoy(x)              → convert to int                │
+│  beg("prompt")           → read user input (string)      │
 │  squirrel()              → random float 0.0–1.0          │
 │  squirrel(n)             → random int 0..n-1             │
 │  squirrel(a, b)          → random int a..b (inclusive)   │
