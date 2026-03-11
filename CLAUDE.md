@@ -38,7 +38,8 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `bark` | print |
 | `growl` | raise error |
 | `fetch` | create variable |
-| `sniff` | if / comment |
+| `sniff` | if (ends with `:`) or legacy comment (no colon) |
+| `woof` | comment (always — preferred) |
 | `else sniff` | elif |
 | `else pout` | else |
 | `zoomies` | loop (for/foreach/while) |
@@ -52,6 +53,9 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `collar{}` | dictionary literal |
 | `loyal` / `stranger` | true / false |
 | `napping` | null/None |
+| `squirrel()` | random number |
+| `nap(s)` | sleep |
+| `sniff_env(v)` | get environment variable |
 
 ## Code Conventions
 

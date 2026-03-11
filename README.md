@@ -159,6 +159,11 @@ snag "helpers.bark"
 | `goodBoy(x)` | `int(x)` | Convert to integer |
 | `yap(x)` | `str(x)` | Convert to string |
 | `breed(x)` | `type(x).__name__` | Get type name (`"number"`, `"string"`, `"bunny"`, `"collar"`, `"boolean"`, `"napping"`) |
+| `squirrel()` | `random.random()` | Random float 0.0–1.0 |
+| `squirrel(n)` | `random.randrange(n)` | Random int 0 to n-1 |
+| `squirrel(a, b)` | `random.randint(a, b)` | Random int a to b inclusive |
+| `nap(seconds)` | `time.sleep(seconds)` | Sleep for N seconds |
+| `sniff_env("VAR")` | `os.environ.get("VAR")` | Get environment variable, or `napping` if unset |
 
 ### String Methods
 | Charlotte | Python | Description |
@@ -174,8 +179,11 @@ snag "helpers.bark"
 
 ### Comments
 ```
-sniff This is a comment — Charlotte sniffs it and moves on
+woof This is always a comment, even if it ends with a colon:
+sniff This is also a comment — as long as it doesn't end with a colon
 ```
+
+`woof` is the preferred comment syntax — it's unambiguous regardless of content. `sniff` without a trailing `:` also works for backward compatibility, but avoid ending `sniff` comments with `:` since that makes them look like `if` statements.
 
 ## REPL
 
