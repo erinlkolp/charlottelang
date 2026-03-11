@@ -1,0 +1,12 @@
+sniff FizzBuzz but make it Charlotte
+
+zoomies 20 times:
+  fetch n = lap + 1
+  sniff n % 15 == 0:
+    bark f"{n}: 🐕 BARK BUZZ! (FizzBuzz)"
+  else sniff n % 3 == 0:
+    bark f"{n}: 🐕 BARK! (Fizz)"
+  else sniff n % 5 == 0:
+    bark f"{n}: 💨 ZOOM! (Buzz)"
+  else pout:
+    bark f"{n}: *quiet tail wag*"

@@ -1,0 +1,10 @@
+sniff Charlotte's first program!
+
+bark "Yap yap! Hello World! 🐾"
+bark ""
+
+fetch name = "Charlotte"
+fetch treats = 10
+
+bark f"{name} has {treats} treats!"
+bark f"After sharing: {treats // 2} each 🦴"

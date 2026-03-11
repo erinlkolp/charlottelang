@@ -1,0 +1,14 @@
+[project]
+name = "charlottelang"
+version = "2.0.0"
+description = "A Pythonic programming language with chihuahua soul and pitbull energy 🐕"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.scripts]
+charlotte = "charlotte:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"

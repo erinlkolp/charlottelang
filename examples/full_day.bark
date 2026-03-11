@@ -1,0 +1,37 @@
+sniff A full day in Charlotte's life
+
+teach trick greet_stranger(who):
+  bark f"🐕 BARK BARK BARK at {who}!!"
+  bark "🐕 I'M A PITBULL, FEAR ME!"
+
+teach trick play_with_bunny(minutes):
+  bark "🐰 *grabs Bunny*"
+  zoomies minutes times:
+    bark f"  *shakes Bunny violently* round {lap}"
+  bark "🐰 *cuddles Bunny gently*"
+
+teach trick check_mood(treats, rubs):
+  fetch happiness = treats + rubs
+  sniff happiness is bigger than 10:
+    rollover "ecstatic 🥰"
+  else sniff happiness is bigger than 5:
+    rollover "content 😊"
+  else pout:
+    rollover "need more treats 😤"
+
+bark "=== Morning ==="
+greet_stranger("mailman")
+
+bark ""
+bark "=== Playtime ==="
+play_with_bunny(3)
+
+bark ""
+bark "=== Treat Check ==="
+fetch mood = check_mood(4, 8)
+bark f"Charlotte is: {mood}"
+
+bark ""
+bark "=== Evening ==="
+bark "🐾 *rolls onto back*"
+bark "Scratch. My. Belly. Now. 👑"
