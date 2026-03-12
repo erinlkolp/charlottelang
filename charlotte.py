@@ -356,6 +356,11 @@ class Interpreter:
                     self.variables[target] = self._evaluate(parts[1].strip(), ln)
                     i += 1
                     continue
+                if target.isidentifier() and target not in self.variables and not parts[1].startswith("="):
+                    raise CharlotteError(
+                        f"*confused sniff* \"{target}\" hasn't been fetched yet! "
+                        f"Use: fetch {target} = ...", ln
+                    )
 
             # ── .give() (append) ──
             if ".give(" in text and text.endswith(")"):
@@ -958,117 +963,115 @@ class Interpreter:
 
         # .toys (length) — works for lists, strings, and dicts
         if expr.endswith(".toys"):
-            name = expr[:-5]
-            if name in self.variables:
-                val = self.variables[name]
-                if isinstance(val, (list, str, dict)):
-                    return len(val)
+            val = self._evaluate(expr[:-5], ln)
+            if isinstance(val, (list, str, dict)):
+                return len(val)
             return 0
 
         # .keys — get dict keys as a list
         if expr.endswith(".keys"):
-            name = expr[:-5]
-            if name in self.variables and isinstance(self.variables[name], dict):
-                return list(self.variables[name].keys())
+            val = self._evaluate(expr[:-5], ln)
+            if isinstance(val, dict):
+                return list(val.keys())
 
         # .values — get dict values as a list
         if expr.endswith(".values"):
-            name = expr[:-7]
-            if name in self.variables and isinstance(self.variables[name], dict):
-                return list(self.variables[name].values())
+            val = self._evaluate(expr[:-7], ln)
+            if isinstance(val, dict):
+                return list(val.values())
 
         # String methods
         # .chew(sep) — split string
         if ".chew(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".chew(")
-            name = expr[:dot_pos]
+            val = self._evaluate(expr[:dot_pos], ln)
             sep_expr = expr[dot_pos + 6:-1]
-            if name in self.variables and isinstance(self.variables[name], str):
+            if isinstance(val, str):
                 sep = self._evaluate(sep_expr, ln) if sep_expr.strip() else None
-                return self.variables[name].split(sep)
+                return val.split(sep)
 
         # .trim() — strip whitespace
         if expr.endswith(".trim()"):
-            name = expr[:-7]
-            if name in self.variables and isinstance(self.variables[name], str):
-                return self.variables[name].strip()
+            val = self._evaluate(expr[:-7], ln)
+            if isinstance(val, str):
+                return val.strip()
 
         # .upper() — uppercase
         if expr.endswith(".upper()"):
-            name = expr[:-8]
-            if name in self.variables and isinstance(self.variables[name], str):
-                return self.variables[name].upper()
+            val = self._evaluate(expr[:-8], ln)
+            if isinstance(val, str):
+                return val.upper()
 
         # .lower() — lowercase
         if expr.endswith(".lower()"):
-            name = expr[:-8]
-            if name in self.variables and isinstance(self.variables[name], str):
-                return self.variables[name].lower()
+            val = self._evaluate(expr[:-8], ln)
+            if isinstance(val, str):
+                return val.lower()
 
         # .replace(old, new) — replace all occurrences in a string
         if ".replace(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".replace(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], str):
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, str):
                 args = self._parse_args(expr[dot_pos + 9:-1])
                 if len(args) == 2:
                     old = self._evaluate(args[0].strip(), ln)
                     new = self._evaluate(args[1].strip(), ln)
-                    return self.variables[name].replace(str(old), str(new))
+                    return val.replace(str(old), str(new))
 
         # .find(sub) — find index of substring, -1 if not found
         if ".find(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".find(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], str):
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, str):
                 sub = self._evaluate(expr[dot_pos + 6:-1], ln)
-                return self.variables[name].find(str(sub))
+                return val.find(str(sub))
 
         # .startswith(prefix) — check if string starts with prefix
         if ".startswith(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".startswith(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], str):
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, str):
                 prefix = self._evaluate(expr[dot_pos + 12:-1], ln)
-                return self.variables[name].startswith(str(prefix))
+                return val.startswith(str(prefix))
 
         # .endswith(suffix) — check if string ends with suffix
         if ".endswith(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".endswith(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], str):
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, str):
                 suffix = self._evaluate(expr[dot_pos + 10:-1], ln)
-                return self.variables[name].endswith(str(suffix))
+                return val.endswith(str(suffix))
 
         # .join(sep) — join list elements with a separator string
         if ".join(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".join(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], list):
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, list):
                 sep = self._evaluate(expr[dot_pos + 6:-1], ln)
-                return str(sep).join(str(item) for item in self.variables[name])
+                return str(sep).join(str(item) for item in val)
 
         # .index(val) — find index of value in list, -1 if not found
         if ".index(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".index(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], list):
-                val = self._evaluate(expr[dot_pos + 7:-1], ln)
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, list):
+                search = self._evaluate(expr[dot_pos + 7:-1], ln)
                 try:
-                    return self.variables[name].index(val)
+                    return val.index(search)
                 except ValueError:
                     return -1
 
         # .pop() / .pop(idx) — remove and return element from list
         if ".pop(" in expr and expr.endswith(")"):
             dot_pos = expr.index(".pop(")
-            name = expr[:dot_pos]
-            if name in self.variables and isinstance(self.variables[name], list):
+            val = self._evaluate(expr[:dot_pos], ln)
+            if isinstance(val, list):
                 idx_expr = expr[dot_pos + 5:-1].strip()
                 try:
                     if idx_expr:
-                        return self.variables[name].pop(int(self._evaluate(idx_expr, ln)))
-                    return self.variables[name].pop()
+                        return val.pop(int(self._evaluate(idx_expr, ln)))
+                    return val.pop()
                 except IndexError:
                     raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
 
