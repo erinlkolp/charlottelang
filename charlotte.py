@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CharlotteLang Interpreter v4.0
+CharlotteLang Interpreter v4.1
 A Pythonic programming language with chihuahua soul and pitbull energy.
 
 Usage:
@@ -172,7 +172,10 @@ class Interpreter:
             req_headers.update({str(k): str(v) for k, v in headers.items()})
         body_bytes = None
         if data is not None:
-            body_bytes = str(data).encode("utf-8")
+            if isinstance(data, (dict, list)):
+                body_bytes = json.dumps(self._to_json_compatible(data)).encode("utf-8")
+            else:
+                body_bytes = str(data).encode("utf-8")
             if "Content-Type" not in req_headers:
                 req_headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)
@@ -667,7 +670,12 @@ class Interpreter:
             source = f.read()
 
         import_lines = parse_lines(source)
-        self._execute_block(import_lines)
+        saved_dir = self._source_dir
+        self._source_dir = os.path.dirname(path)
+        try:
+            self._execute_block(import_lines)
+        finally:
+            self._source_dir = saved_dir
         return i + 1
 
     # ── Function calls ──
@@ -675,6 +683,11 @@ class Interpreter:
     def _call_function(self, name: str, arg_str: str, ln: int):
         fn = self.functions[name]
         args = [self._evaluate(a.strip(), ln) for a in self._parse_args(arg_str)] if arg_str.strip() else []
+        if len(args) != len(fn["params"]):
+            raise CharlotteError(
+                f"*confused bark* {name}() expects {len(fn['params'])} "
+                f"argument(s), got {len(args)}!", ln
+            )
         saved = copy.deepcopy(self.variables)
         for p, a in zip(fn["params"], args):
             self.variables[p] = a
@@ -759,6 +772,15 @@ class Interpreter:
             i += 1
         return False
 
+    def _count_preceding_backslashes(self, s: str, pos: int) -> int:
+        """Count consecutive backslashes immediately before position pos."""
+        count = 0
+        pos -= 1
+        while pos >= 0 and s[pos] == '\\':
+            count += 1
+            pos -= 1
+        return count
+
     def _rfind_operator(self, expr: str, op: str) -> int:
         """Find rightmost operator position respecting parentheses/brackets/braces/strings."""
         depth = 0
@@ -770,7 +792,7 @@ class Interpreter:
             if not in_string and ch in ('"', "'"):
                 in_string = True
                 string_char = ch
-            elif in_string and ch == string_char and (i == 0 or expr[i-1] != '\\'):
+            elif in_string and ch == string_char and self._count_preceding_backslashes(expr, i) % 2 == 0:
                 in_string = False
             if not in_string:
                 if ch in "([{":
@@ -1289,7 +1311,7 @@ class Interpreter:
             if not in_string and ch in ('"', "'"):
                 in_string = True
                 string_char = ch
-            elif in_string and ch == string_char and (i == 0 or expr[i-1] != '\\'):
+            elif in_string and ch == string_char and self._count_preceding_backslashes(expr, i) % 2 == 0:
                 in_string = False
             if not in_string:
                 if ch in "([{":
@@ -1322,7 +1344,7 @@ class Interpreter:
 
 def run_repl():
     """Interactive CharlotteLang REPL."""
-    print("🐕 CharlotteLang v4.0 REPL")
+    print("🐕 CharlotteLang v4.1 REPL")
     print("   Type Charlotte code below. Commands:")
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
@@ -1499,7 +1521,7 @@ def print_quick_ref():
 
 def main():
     if len(sys.argv) < 2:
-        print("🐕 CharlotteLang v4.0")
+        print("🐕 CharlotteLang v4.1")
         print()
         print("Usage:")
         print("  charlotte run <file.bark>   Run a .bark file")
