@@ -58,6 +58,13 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `sniff_env(v)` | get environment variable |
 | `beg(prompt)` | read user input from stdin (returns string) |
 | `zoomies VAR through` | named foreach — `VAR` holds each item, `lap` holds index |
+| `loyal(x)` | convert to bool |
+| `abs(x)` | absolute value |
+| `round(x, n)` | round a number |
+| `min(...)` / `max(...)` | min/max of args or a list |
+| `x ** y` | power/exponent |
+| `"s" * n` | string repetition |
+| `x not in collection` | negative membership test |
 
 ## Code Conventions
 
@@ -70,7 +77,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 
 ## Testing
 
-Run the full test suite with pytest (267 tests):
+Run the full test suite with pytest (305 tests):
 
 ```bash
 python -m pytest tests/

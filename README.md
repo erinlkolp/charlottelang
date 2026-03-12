@@ -149,7 +149,9 @@ snag "helpers.bark"
 | `a is smaller than b` | `a < b` | Less than |
 | `and` / `or` / `not` | `and` / `or` / `not` | Logical operators |
 | `item in list` | `item in list` | Membership test (lists, dicts, strings) |
-| `+ - * / // %` | `+ - * / // %` | Arithmetic |
+| `item not in list` | `item not in list` | Negative membership test |
+| `+ - * / // % **` | `+ - * / // % **` | Arithmetic (`**` = power/exponent) |
+| `"ha" * 3` | `"ha" * 3` | String repetition → `"hahaha"` |
 
 ### Built-in Functions
 | Charlotte | Python | Description |
@@ -164,6 +166,12 @@ snag "helpers.bark"
 | `squirrel(a, b)` | `random.randint(a, b)` | Random int a to b inclusive |
 | `nap(seconds)` | `time.sleep(seconds)` | Sleep for N seconds |
 | `sniff_env("VAR")` | `os.environ.get("VAR")` | Get environment variable, or `napping` if unset |
+| `loyal(x)` | `bool(x)` | Convert to boolean |
+| `abs(x)` | `abs(x)` | Absolute value |
+| `round(x)` / `round(x, n)` | `round(x, n)` | Round a number |
+| `min(a, b)` / `min(list)` | `min(a, b)` | Minimum value |
+| `max(a, b)` / `max(list)` | `max(a, b)` | Maximum value |
+| `beg("prompt")` | `input("prompt")` | Read user input from stdin |
 
 ### String Methods
 | Charlotte | Python | Description |
@@ -197,8 +205,11 @@ REPL commands:
 - `.run` — execute the buffer
 - `.clear` — clear the buffer
 - `.show` — show the buffer
+- `.vars` — display all current variables and their values
 - `.help` — quick reference card
 - `.exit` — leave the REPL
+
+The REPL supports up-arrow history (via `readline` when available).
 
 Single-line statements auto-execute. Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
 

@@ -1361,3 +1361,132 @@ class TestFStringBraceDepth:
 
     def test_fstring_no_expressions(self):
         assert only('bark f"just text"') == "just text"
+
+
+# ─── Quick-wins features ─────────────────────────────────────
+
+class TestQuickWins:
+    """Tests for: not in, **, string repeat, abs/min/max/round, loyal()"""
+
+    # not in
+    def test_not_in_list_true(self):
+        assert only('fetch a = bunny[1, 2, 3]\nbark loyal(4 not in a)') == "True"
+
+    def test_not_in_list_false(self):
+        assert only('fetch a = bunny[1, 2, 3]\nbark loyal(1 not in a)') == "False"
+
+    def test_not_in_string_true(self):
+        assert only('fetch s = "hello"\nbark loyal("z" not in s)') == "True"
+
+    def test_not_in_string_false(self):
+        assert only('fetch s = "hello"\nbark loyal("e" not in s)') == "False"
+
+    def test_not_in_dict_key_true(self):
+        assert only('fetch d = collar{"a": 1}\nbark loyal("b" not in d)') == "True"
+
+    def test_not_in_dict_key_false(self):
+        assert only('fetch d = collar{"a": 1}\nbark loyal("a" not in d)') == "False"
+
+    def test_not_in_conditional(self):
+        src = 'fetch a = bunny[1, 2]\nsniff 5 not in a:\n  bark "missing"'
+        assert only(src) == "missing"
+
+    # ** power operator
+    def test_power_integers(self):
+        assert only('bark 2 ** 10') == "1024"
+
+    def test_power_float_exponent(self):
+        assert only('bark 9 ** 0.5') == "3.0"
+
+    def test_power_zero(self):
+        assert only('bark 7 ** 0') == "1"
+
+    def test_power_in_expression(self):
+        assert only('fetch x = 3\nbark x ** 3') == "27"
+
+    def test_power_in_fstring(self):
+        assert only('bark f"{2 ** 8}"') == "256"
+
+    # string * repeat
+    def test_string_repeat_right(self):
+        assert only('bark "ha" * 3') == "hahaha"
+
+    def test_string_repeat_left(self):
+        assert only('bark 3 * "ha"') == "hahaha"
+
+    def test_string_repeat_zero(self):
+        assert only('bark "x" * 0') == ""
+
+    def test_string_repeat_variable(self):
+        assert only('fetch s = "ab"\nbark s * 2') == "abab"
+
+    # abs()
+    def test_abs_negative(self):
+        assert only('bark abs(-7)') == "7"
+
+    def test_abs_positive(self):
+        assert only('bark abs(5)') == "5"
+
+    def test_abs_zero(self):
+        assert only('bark abs(0)') == "0"
+
+    def test_abs_float(self):
+        assert only('bark abs(-3.14)') == "3.14"
+
+    # round()
+    def test_round_no_digits(self):
+        assert only('bark round(3.7)') == "4"
+
+    def test_round_with_digits(self):
+        assert only('bark round(3.14159, 2)') == "3.14"
+
+    def test_round_negative(self):
+        assert only('bark round(-2.6)') == "-3"
+
+    # min()
+    def test_min_two_args(self):
+        assert only('bark min(3, 7)') == "3"
+
+    def test_min_multiple_args(self):
+        assert only('bark min(5, 1, 9, 2)') == "1"
+
+    def test_min_list(self):
+        assert only('fetch a = bunny[8, 3, 5]\nbark min(a)') == "3"
+
+    # max()
+    def test_max_two_args(self):
+        assert only('bark max(3, 7)') == "7"
+
+    def test_max_multiple_args(self):
+        assert only('bark max(5, 1, 9, 2)') == "9"
+
+    def test_max_list(self):
+        assert only('fetch a = bunny[8, 3, 5]\nbark max(a)') == "8"
+
+    # loyal() bool cast
+    def test_loyal_truthy_number(self):
+        assert only('bark loyal(1)') == "True"
+
+    def test_loyal_falsy_number(self):
+        assert only('bark loyal(0)') == "False"
+
+    def test_loyal_truthy_string(self):
+        assert only('bark loyal("hi")') == "True"
+
+    def test_loyal_falsy_string(self):
+        assert only('bark loyal("")') == "False"
+
+    def test_loyal_napping(self):
+        assert only('bark loyal(napping)') == "False"
+
+    def test_loyal_stranger(self):
+        assert only('bark loyal(stranger)') == "False"
+
+    def test_loyal_loyal(self):
+        assert only('bark loyal(loyal)') == "True"
+
+    def test_loyal_list_empty(self):
+        assert only('bark loyal(bunny[])') == "False"
+
+    def test_loyal_list_nonempty(self):
+        assert only('bark loyal(bunny[1])') == "True"
