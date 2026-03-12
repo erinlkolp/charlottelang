@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v4.0
+# 🐕 CharlotteLang v4.1
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -149,8 +149,8 @@ snag "helpers.bark"
 | `a ~ b` | `a + b` (strings) | String concatenation |
 | `a equals b` or `a == b` | `a == b` | Equality |
 | `a not equals b` or `a != b` | `a != b` | Inequality |
-| `a is bigger than b` | `a > b` | Greater than |
-| `a is smaller than b` | `a < b` | Less than |
+| `a is bigger than b` or `a > b` | `a > b` | Greater than |
+| `a is smaller than b` or `a < b` | `a < b` | Less than |
 | `and` / `or` / `not` | `and` / `or` / `not` | Logical operators |
 | `item in list` | `item in list` | Membership test (lists, dicts, strings) |
 | `item not in list` | `item not in list` | Negative membership test |
@@ -216,6 +216,8 @@ REPL commands:
 The REPL supports up-arrow history (via `readline` when available).
 
 Single-line statements auto-execute. Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
+
+Variables and functions defined in one `.run` session persist for the next — the REPL maintains state across executions. Use `.vars` to inspect current state. To fully reset, restart the REPL.
 
 ## Examples
 

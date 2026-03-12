@@ -14,6 +14,7 @@ import os
 import re
 import random
 import time
+import copy
 try:
     import readline  # noqa: F401 — enables up-arrow history in REPL
 except ImportError:
@@ -100,12 +101,16 @@ class Interpreter:
         self._source_dir: str = os.getcwd()
 
     def run(self, source: str, source_path: str = None):
-        """Run a CharlotteLang program from source string."""
+        """Run a CharlotteLang program from source string, resetting all state first."""
         self.variables = {}
         self.functions = {}
         self._imported_files = set()
         if source_path:
             self._source_dir = os.path.dirname(os.path.abspath(source_path))
+        self.execute(source)
+
+    def execute(self, source: str):
+        """Execute CharlotteLang source without resetting state (used by REPL)."""
         lines = parse_lines(source)
         try:
             self._execute_block(lines)
@@ -562,16 +567,17 @@ class Interpreter:
     def _call_function(self, name: str, arg_str: str, ln: int):
         fn = self.functions[name]
         args = [self._evaluate(a.strip(), ln) for a in self._parse_args(arg_str)] if arg_str.strip() else []
-        saved = self.variables.copy()
+        saved = copy.deepcopy(self.variables)
         for p, a in zip(fn["params"], args):
             self.variables[p] = a
+        result = None
         try:
             self._execute_block(fn["body"])
         except CharlotteReturn as ret:
+            result = ret.value
+        finally:
             self.variables = saved
-            return ret.value
-        self.variables = saved
-        return None
+        return result
 
     def _parse_args(self, arg_str: str) -> list[str]:
         """Split arguments respecting parentheses, brackets, braces, and strings."""
@@ -740,9 +746,9 @@ class Interpreter:
             result = {}
             pairs = self._parse_args(inner)
             for pair in pairs:
-                if ":" not in pair:
+                colon_pos = self._find_operator(pair, ":")
+                if colon_pos == -1:
                     raise CharlotteError("collar entries need key: value format!", ln)
-                colon_pos = pair.index(":")
                 key = self._evaluate(pair[:colon_pos].strip(), ln)
                 val = self._evaluate(pair[colon_pos + 1:].strip(), ln)
                 result[key] = val
@@ -785,9 +791,25 @@ class Interpreter:
                     raise CharlotteError("Can only slice a bunny (array) or string!", ln)
                 key = self._evaluate(key_expr, ln)
                 if isinstance(container, list):
-                    return container[int(key)]
+                    try:
+                        return container[int(key)]
+                    except IndexError:
+                        raise CharlotteError(
+                            f"*paws at empty bunny* Index {int(key)} is out of bounds! "
+                            f"List has {len(container)} items.", ln)
+                    except (ValueError, TypeError):
+                        raise CharlotteError(
+                            f"*confused sniff* List index must be a number, got: {key!r}", ln)
                 if isinstance(container, str):
-                    return container[int(key)]
+                    try:
+                        return container[int(key)]
+                    except IndexError:
+                        raise CharlotteError(
+                            f"*paws at string* Index {int(key)} is out of bounds! "
+                            f"String has {len(container)} characters.", ln)
+                    except (ValueError, TypeError):
+                        raise CharlotteError(
+                            f"*confused sniff* String index must be a number, got: {key!r}", ln)
                 if isinstance(container, dict):
                     if key not in container:
                         raise CharlotteError(f"*digs around* Key \"{key}\" not found in collar!", ln)
@@ -934,12 +956,14 @@ class Interpreter:
             parts.append(expr)
             return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
 
-        # Comparisons
+        # Comparisons — longer forms checked before shorter to avoid partial matches
         comparisons = [
             (" is bigger than ", lambda a, b: a > b),
             (" is smaller than ", lambda a, b: a < b),
             (" >= ", lambda a, b: a >= b),
             (" <= ", lambda a, b: a <= b),
+            (" > ", lambda a, b: a > b),
+            (" < ", lambda a, b: a < b),
             (" not equals ", lambda a, b: a != b),
             (" equals ", lambda a, b: a == b),
             (" != ", lambda a, b: a != b),
@@ -999,7 +1023,10 @@ class Interpreter:
             return len(val) if isinstance(val, (list, str, dict)) else len(str(val))
 
         if expr.startswith("treat(") and expr.endswith(")"):
-            return float(self._evaluate(expr[6:-1], ln))
+            try:
+                return float(self._evaluate(expr[6:-1], ln))
+            except (ValueError, TypeError) as e:
+                raise CharlotteError(f"*confused look* treat() couldn't convert that to a float: {e}", ln)
 
         if expr.startswith("yap(") and expr.endswith(")"):
             return str(self._evaluate(expr[4:-1], ln))
@@ -1013,7 +1040,10 @@ class Interpreter:
             return type_map.get(type(val), "unknown") if val is not None else "napping"
 
         if expr.startswith("goodBoy(") and expr.endswith(")"):
-            return int(self._evaluate(expr[8:-1], ln))
+            try:
+                return int(self._evaluate(expr[8:-1], ln))
+            except (ValueError, TypeError) as e:
+                raise CharlotteError(f"*confused look* goodBoy() couldn't convert that to an integer: {e}", ln)
 
         # loyal(x) — convert to bool
         if expr.startswith("loyal(") and expr.endswith(")"):
@@ -1163,7 +1193,7 @@ def run_repl():
         elif line.strip() == ".run":
             if buffer:
                 source = "\n".join(buffer)
-                interp.run(source)
+                interp.execute(source)
                 buffer = []
             else:
                 print("🐾 Nothing to run!")
@@ -1188,7 +1218,7 @@ def run_repl():
                 not stripped.endswith(":") and
                 not buffer[-1].startswith(" ") and
                 len(buffer) == 1):
-                interp.run(stripped)
+                interp.execute(stripped)
                 buffer = []
 
 
