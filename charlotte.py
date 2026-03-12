@@ -14,6 +14,10 @@ import os
 import re
 import random
 import time
+try:
+    import readline  # noqa: F401 — enables up-arrow history in REPL
+except ImportError:
+    pass
 
 
 class CharlotteError(Exception):
@@ -920,6 +924,7 @@ class Interpreter:
             (" equals ", lambda a, b: a == b),
             (" != ", lambda a, b: a != b),
             (" == ", lambda a, b: a == b),
+            (" not in ", lambda a, b: a not in b if isinstance(b, (list, dict)) else str(a) not in str(b)),
             (" in ", lambda a, b: a in b if isinstance(b, (list, dict)) else str(a) in str(b)),
         ]
         for op_str, op_fn in comparisons:
@@ -941,6 +946,13 @@ class Interpreter:
                     return left + right
                 return left - right
 
+        # Arithmetic: ** (power) — higher precedence, right-to-left
+        idx = self._find_operator(expr, " ** ")
+        if idx != -1:
+            left = self._evaluate(expr[:idx], ln)
+            right = self._evaluate(expr[idx + 4:], ln)
+            return left ** right
+
         # Arithmetic: * / // %
         for op in (" // ", " / ", " * ", " % "):
             idx = self._rfind_operator(expr, op)
@@ -952,6 +964,10 @@ class Interpreter:
                 if op == " // ":
                     return left // right
                 if op == " * ":
+                    if isinstance(left, str) and isinstance(right, int):
+                        return left * right
+                    if isinstance(left, int) and isinstance(right, str):
+                        return right * left
                     return left * right
                 if op == " % ":
                     return left % right
@@ -978,6 +994,39 @@ class Interpreter:
 
         if expr.startswith("goodBoy(") and expr.endswith(")"):
             return int(self._evaluate(expr[8:-1], ln))
+
+        # loyal(x) — convert to bool
+        if expr.startswith("loyal(") and expr.endswith(")"):
+            return self._is_truthy(self._evaluate(expr[6:-1], ln))
+
+        # abs(x) — absolute value
+        if expr.startswith("abs(") and expr.endswith(")"):
+            return abs(self._evaluate(expr[4:-1], ln))
+
+        # round(x) / round(x, digits) — round a number
+        if expr.startswith("round(") and expr.endswith(")"):
+            args = self._parse_args(expr[6:-1])
+            val = self._evaluate(args[0].strip(), ln)
+            digits = int(self._evaluate(args[1].strip(), ln)) if len(args) > 1 else None
+            return round(val, digits)
+
+        # min(a, b, ...) or min(list) — minimum value
+        if expr.startswith("min(") and expr.endswith(")"):
+            args = self._parse_args(expr[4:-1])
+            if len(args) == 1:
+                val = self._evaluate(args[0].strip(), ln)
+                if isinstance(val, list):
+                    return min(val)
+            return min(self._evaluate(a.strip(), ln) for a in args)
+
+        # max(a, b, ...) or max(list) — maximum value
+        if expr.startswith("max(") and expr.endswith(")"):
+            args = self._parse_args(expr[4:-1])
+            if len(args) == 1:
+                val = self._evaluate(args[0].strip(), ln)
+                if isinstance(val, list):
+                    return max(val)
+            return max(self._evaluate(a.strip(), ln) for a in args)
 
         # squirrel() — random number; squirrel() → float, squirrel(n) → int 0..n-1, squirrel(a,b) → int a..b
         if expr.startswith("squirrel(") and expr.endswith(")"):
@@ -1059,6 +1108,7 @@ def run_repl():
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
     print("   .show     — show the buffer")
+    print("   .vars     — show all current variables")
     print("   .exit     — leave the REPL")
     print("   .help     — show quick reference")
     print()
@@ -1097,6 +1147,15 @@ def run_repl():
                 buffer = []
             else:
                 print("🐾 Nothing to run!")
+            continue
+        elif line.strip() == ".vars":
+            if interp.variables:
+                print("─── variables ───")
+                for k, v in interp.variables.items():
+                    print(f"  {k} = {v!r}")
+                print("─────────────────")
+            else:
+                print("🐾 No variables set yet")
             continue
         elif line.strip() == ".help":
             print_quick_ref()
@@ -1175,6 +1234,11 @@ def print_quick_ref():
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
 │  goodBoy(x)              → convert to int                │
+│  loyal(x)                → convert to bool               │
+│  abs(x)                  → absolute value                │
+│  round(x) / round(x, n)  → round a number               │
+│  min(a, b) / min(list)   → minimum value                 │
+│  max(a, b) / max(list)   → maximum value                 │
 │  beg("prompt")           → read user input (string)      │
 │  squirrel()              → random float 0.0–1.0          │
 │  squirrel(n)             → random int 0..n-1             │
@@ -1184,8 +1248,10 @@ def print_quick_ref():
 │  woof this is a comment  → comment (always)              │
 │  sniff this is ignored   → comment (only without colon)  │
 │  a ~ b                   → string concat                 │
-│  and / or / not / in     → logical ops                   │
-│  + - * / // %            → arithmetic                    │
+│  and / or / not          → logical ops                   │
+│  in / not in             → membership test               │
+│  + - * / // % **         → arithmetic (** = power)       │
+│  "ha" * 3                → "hahaha" (string repeat)      │
 │                                                          │
 │  careful:                → try block                     │
 │    risky code here                                       │
@@ -1193,6 +1259,8 @@ def print_quick_ref():
 │    bark e                                                │
 │                                                          │
 │  snag "file.bark"        → import another file           │
+│                                                          │
+│  REPL commands: .run .clear .show .vars .help .exit      │
 └──────────────────────────────────────────────────────────┘
 """)
 
