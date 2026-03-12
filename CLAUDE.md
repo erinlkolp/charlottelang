@@ -30,6 +30,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
    - `_evaluate()` — recursive expression evaluator
    - `_handle_*()` methods for each statement type
    - `_call_function()` — calls user-defined functions with deep-copied scope isolation
+   - `env_allowlist` constructor param — `None` (default blocklist) or a set of permitted env var names
 4. **REPL** — `run_repl()` with buffer-based multi-line input; uses `execute()` so variables persist across `.run` commands
 5. **CLI** — `main()` entry point with `run`, `repl`, `help` commands
 
@@ -51,14 +52,14 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `shake off` | break |
 | `keep going` | continue |
 | `careful` / `oops` | try / catch |
-| `snag` | import |
+| `snag` | import (sandboxed to the source directory subtree) |
 | `bunny[]` | array literal |
 | `collar{}` | dictionary literal |
 | `loyal` / `stranger` | true / false |
 | `napping` | null/None |
 | `squirrel()` | random number |
 | `nap(s)` | sleep |
-| `sniff_env(v)` | get environment variable |
+| `sniff_env(v)` | get environment variable (sensitive names blocked by default; see `env_allowlist`) |
 | `beg(prompt)` | read user input from stdin (returns string) |
 | `zoomies VAR through` | named foreach — `VAR` holds each item, `lap` holds index |
 | `loyal(x)` | convert to bool |
@@ -81,7 +82,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 
 ## Testing
 
-Run the full test suite with pytest (357 tests):
+Run the full test suite with pytest (373 tests):
 
 ```bash
 python -m pytest tests/
@@ -93,7 +94,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping). Example files are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing). Example files are also smoke-tested.
 
 To manually verify examples:
 

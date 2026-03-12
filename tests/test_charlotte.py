@@ -10,6 +10,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from charlotte import Interpreter, CharlotteError, parse_lines
+import tempfile
 
 
 # ─── Test Helpers ───────────────────────────────────────────
@@ -1733,3 +1734,176 @@ class TestBoundedErrors:
             '  bark "caught"'
         )
         assert only(src) == "caught"
+
+
+# ─── Security: sniff_env restrictions ───────────────────────
+
+class TestSniffEnvSecurity:
+    """sniff_env must block sensitive var names by default and respect allowlist."""
+
+    def _interp_with_env(self, env_allowlist=None):
+        """Return (outputs, errors, interp) with the given allowlist and a clean env."""
+        outputs, errors = [], []
+        def out_fn(text, kind="bark"):
+            if kind == "error":
+                errors.append(text)
+            else:
+                outputs.append(text)
+        return outputs, errors, Interpreter(output_fn=out_fn, env_allowlist=env_allowlist)
+
+    # ── Default mode (no allowlist) ──
+
+    def test_non_sensitive_var_readable_by_default(self):
+        outputs, errors, interp = self._interp_with_env()
+        import os
+        os.environ["CHARLOTTE_TEST_PLAIN"] = "hello"
+        interp.execute('fetch v = sniff_env("CHARLOTTE_TEST_PLAIN")\nbark v')
+        assert outputs == ["hello"]
+
+    def test_secret_pattern_blocked_by_default(self):
+        outputs, errors, interp = self._interp_with_env()
+        interp.execute('fetch v = sniff_env("MY_SECRET_KEY")')
+        assert len(errors) == 1
+        assert "🐾" in errors[0]
+        assert "restricted" in errors[0].lower() or "secret" in errors[0].lower()
+
+    def test_password_pattern_blocked(self):
+        _, errors, interp = self._interp_with_env()
+        interp.execute('fetch v = sniff_env("DATABASE_PASSWORD")')
+        assert len(errors) == 1
+
+    def test_token_pattern_blocked(self):
+        _, errors, interp = self._interp_with_env()
+        interp.execute('fetch v = sniff_env("GITHUB_TOKEN")')
+        assert len(errors) == 1
+
+    def test_api_key_pattern_blocked(self):
+        _, errors, interp = self._interp_with_env()
+        interp.execute('fetch v = sniff_env("OPENAI_API_KEY")')
+        assert len(errors) == 1
+
+    def test_access_key_pattern_blocked(self):
+        _, errors, interp = self._interp_with_env()
+        interp.execute('fetch v = sniff_env("AWS_ACCESS_KEY_ID")')
+        assert len(errors) == 1
+
+    def test_sensitive_block_is_catchable(self):
+        outputs, errors, interp = self._interp_with_env()
+        interp.execute(
+            'careful:\n'
+            '  fetch v = sniff_env("MY_SECRET")\n'
+            'oops e:\n'
+            '  bark "blocked"'
+        )
+        assert outputs == ["blocked"]
+
+    # ── Strict allowlist mode ──
+
+    def test_allowlist_permits_listed_var(self):
+        import os
+        os.environ["CHARLOTTE_TEST_ALLOWED"] = "yes"
+        outputs, errors, interp = self._interp_with_env(env_allowlist=["CHARLOTTE_TEST_ALLOWED"])
+        interp.execute('fetch v = sniff_env("CHARLOTTE_TEST_ALLOWED")\nbark v')
+        assert outputs == ["yes"]
+
+    def test_allowlist_blocks_unlisted_var(self):
+        _, errors, interp = self._interp_with_env(env_allowlist=["CHARLOTTE_TEST_ALLOWED"])
+        interp.execute('fetch v = sniff_env("HOME")')
+        assert len(errors) == 1
+
+    def test_empty_allowlist_blocks_everything(self):
+        _, errors, interp = self._interp_with_env(env_allowlist=[])
+        interp.execute('fetch v = sniff_env("HOME")')
+        assert len(errors) == 1
+
+    def test_allowlist_can_permit_sensitive_name(self):
+        # An explicit allowlist can grant access to a normally-blocked name
+        import os
+        os.environ["MY_TOKEN"] = "tok123"
+        outputs, errors, interp = self._interp_with_env(env_allowlist=["MY_TOKEN"])
+        interp.execute('fetch v = sniff_env("MY_TOKEN")\nbark v')
+        assert outputs == ["tok123"]
+        assert errors == []
+
+
+# ─── Security: snag path traversal restriction ───────────────
+
+class TestSnagSecurity:
+    """snag must not allow loading files outside the project directory."""
+
+    def _run_file(self, source: str, source_path: str):
+        """Run source as if it were loaded from source_path, capture errors."""
+        errors = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": errors.append(text) if kind == "error" else None
+        )
+        interp.run(source, source_path=source_path)
+        return errors
+
+    def test_traversal_outside_source_dir_blocked(self, tmp_path):
+        # Create a project dir and a target file outside it
+        project = tmp_path / "project"
+        project.mkdir()
+        outside = tmp_path / "secrets.bark"
+        outside.write_text('bark "leaked"')
+
+        main = project / "main.bark"
+        main.write_text('snag "../secrets.bark"')
+
+        errors = self._run_file(main.read_text(), str(main))
+        assert len(errors) == 1
+        assert "🐾" in errors[0]
+        assert "project directory" in errors[0] or "escaping" in errors[0]
+
+    def test_absolute_path_outside_source_dir_blocked(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        outside = tmp_path / "secrets.bark"
+        outside.write_text('bark "leaked"')
+
+        main = project / "main.bark"
+        src = f'snag "{outside}"'
+
+        errors = self._run_file(src, str(main))
+        assert len(errors) == 1
+
+    def test_file_within_source_dir_allowed(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        lib = project / "lib.bark"
+        lib.write_text('bark "lib loaded"')
+
+        outputs = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": outputs.append(text) if kind != "error" else None
+        )
+        main_path = str(project / "main.bark")
+        interp.run('snag "lib.bark"', source_path=main_path)
+        assert outputs == ["lib loaded"]
+
+    def test_subdirectory_import_allowed(self, tmp_path):
+        project = tmp_path / "project"
+        subdir = project / "utils"
+        subdir.mkdir(parents=True)
+        helper = subdir / "helper.bark"
+        helper.write_text('bark "helper ok"')
+
+        outputs = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": outputs.append(text) if kind != "error" else None
+        )
+        main_path = str(project / "main.bark")
+        interp.run('snag "utils/helper.bark"', source_path=main_path)
+        assert outputs == ["helper ok"]
+
+    def test_deep_traversal_blocked(self, tmp_path):
+        project = tmp_path / "a" / "b" / "project"
+        project.mkdir(parents=True)
+        outside = tmp_path / "top.bark"
+        outside.write_text('bark "top"')
+
+        main = project / "main.bark"
+        src = 'snag "../../../top.bark"'
+
+        errors = self._run_file(src, str(main))
+        assert len(errors) == 1

@@ -139,6 +139,8 @@ oops e:
 
 Imports are resolved relative to the current file. Circular imports are automatically prevented.
 
+**Security:** `snag` can only load files within the same directory as the running script (or its subdirectories). Attempts to escape via `../` or absolute paths outside the project directory are blocked.
+
 ```
 snag "helpers.bark"
 ```
@@ -169,7 +171,7 @@ snag "helpers.bark"
 | `squirrel(n)` | `random.randrange(n)` | Random int 0 to n-1 |
 | `squirrel(a, b)` | `random.randint(a, b)` | Random int a to b inclusive |
 | `nap(seconds)` | `time.sleep(seconds)` | Sleep for N seconds |
-| `sniff_env("VAR")` | `os.environ.get("VAR")` | Get environment variable, or `napping` if unset |
+| `sniff_env("VAR")` | `os.environ.get("VAR")` | Get environment variable, or `napping` if unset. Sensitive names (containing `SECRET`, `PASSWORD`, `TOKEN`, `KEY`, etc.) are blocked by default. |
 | `loyal(x)` | `bool(x)` | Convert to boolean |
 | `abs(x)` | `abs(x)` | Absolute value |
 | `round(x)` / `round(x, n)` | `round(x, n)` | Round a number |
@@ -227,6 +229,29 @@ See the `examples/` directory:
 - `full_day.bark` — A full day in Charlotte's life
 - `new_features.bark` — Demo of v3.0 features (dicts, try/catch, imports, string methods, etc.)
 - `helpers.bark` — Helper library used by new_features.bark (demonstrates imports)
+
+## Security
+
+CharlotteLang is designed for trusted personal use. Two protections are built in:
+
+**`snag` sandbox** — import statements can only load `.bark` files within the same directory as the running script (or its subdirectories). Path traversal (`../`) and absolute paths outside the project tree are blocked.
+
+**`sniff_env` blocklist** — environment variable names containing sensitive substrings (`SECRET`, `PASSWORD`, `TOKEN`, `API_KEY`, `ACCESS_KEY`, `CREDENTIAL`, `PRIVATE`, etc.) are blocked by default and raise a `CharlotteError`. This prevents `.bark` scripts from accidentally (or maliciously) leaking secrets from the process environment.
+
+For programmatic use, the `Interpreter` class accepts an `env_allowlist` parameter:
+
+```python
+# Only permit specific vars; block everything else (including non-sensitive ones)
+interp = Interpreter(env_allowlist=["HOME", "PATH", "LANG"])
+
+# Block all env access
+interp = Interpreter(env_allowlist=[])
+
+# Default: non-sensitive vars allowed, sensitive patterns blocked
+interp = Interpreter()
+```
+
+> **Note:** CharlotteLang has no process sandbox. Do not run untrusted `.bark` scripts with elevated privileges.
 
 ## The Philosophy
 

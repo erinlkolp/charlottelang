@@ -88,7 +88,23 @@ class Interpreter:
 
     MAX_LOOPS = 10_000
 
-    def __init__(self, output_fn=None):
+    # Substrings that mark an env var name as sensitive (case-insensitive).
+    # Access to any matching name is blocked unless it appears in env_allowlist.
+    _ENV_SENSITIVE_PATTERNS: tuple = (
+        "SECRET", "PASSWORD", "PASSWD", "TOKEN", "API_KEY", "APIKEY",
+        "PRIVATE_KEY", "PRIVATEKEY", "ACCESS_KEY", "ACCESSKEY",
+        "AUTH_KEY", "AUTHKEY", "CREDENTIAL", "PRIVATE",
+    )
+
+    def __init__(self, output_fn=None, env_allowlist=None):
+        """
+        output_fn: optional callable(text, kind) for all output.
+        env_allowlist: optional collection of env var names that sniff_env may read.
+            - None (default): all non-sensitive vars are readable; vars matching
+              _ENV_SENSITIVE_PATTERNS are blocked.
+            - A set/list: ONLY the listed names are readable; everything else
+              (including non-sensitive vars) is blocked.
+        """
         self.variables: dict = {}
         self.functions: dict = {}
         def _default_output(text, kind="bark"):
@@ -99,6 +115,18 @@ class Interpreter:
         self.output_fn = output_fn or _default_output
         self._imported_files: set = set()
         self._source_dir: str = os.getcwd()
+        # None → use default blocklist; a frozenset → strict allowlist
+        self._env_allowlist: frozenset | None = (
+            frozenset(env_allowlist) if env_allowlist is not None else None
+        )
+
+    def _env_var_permitted(self, name: str) -> bool:
+        """Return True if sniff_env is allowed to read this env var name."""
+        if self._env_allowlist is not None:
+            return name in self._env_allowlist
+        # Default mode: block names that look like secrets
+        upper = name.upper()
+        return not any(pattern in upper for pattern in self._ENV_SENSITIVE_PATTERNS)
 
     def run(self, source: str, source_path: str = None):
         """Run a CharlotteLang program from source string, resetting all state first."""
@@ -545,7 +573,17 @@ class Interpreter:
         # Resolve relative to source directory
         if not os.path.isabs(path):
             path = os.path.join(self._source_dir, path)
-        path = os.path.abspath(path)
+        # Use realpath to canonicalise and resolve any symlinks before checking
+        path = os.path.realpath(path)
+        source_dir = os.path.realpath(self._source_dir)
+
+        # Security: imports must stay within the project directory subtree
+        allowed_prefix = source_dir.rstrip(os.sep) + os.sep
+        if path != source_dir and not path.startswith(allowed_prefix):
+            raise CharlotteError(
+                "*suspicious growl* snag can only load files inside the "
+                "project directory — no escaping allowed!", ln
+            )
 
         # Prevent circular imports
         if path in self._imported_files:
@@ -1097,8 +1135,13 @@ class Interpreter:
 
         # sniff_env(var) — get environment variable, returns napping if not set
         if expr.startswith("sniff_env(") and expr.endswith(")"):
-            var = self._evaluate(expr[10:-1], ln)
-            return os.environ.get(str(var), None)
+            var = str(self._evaluate(expr[10:-1], ln))
+            if not self._env_var_permitted(var):
+                raise CharlotteError(
+                    f"*protective growl* sniff_env: \"{var}\" is restricted — "
+                    f"looks like a secret or is not on the allowed list!", ln
+                )
+            return os.environ.get(var, None)
 
         # beg(prompt) — read user input from stdin, returns string
         if expr.startswith("beg(") and expr.endswith(")"):
