@@ -15,6 +15,10 @@ import re
 import random
 import time
 import copy
+import json
+import urllib.request
+import urllib.error
+import urllib.parse
 try:
     import readline  # noqa: F401 — enables up-arrow history in REPL
 except ImportError:
@@ -96,7 +100,11 @@ class Interpreter:
         "AUTH_KEY", "AUTHKEY", "CREDENTIAL", "PRIVATE",
     )
 
-    def __init__(self, output_fn=None, env_allowlist=None):
+    MAX_HTTP_TIMEOUT = 30
+    MAX_HTTP_RESPONSE = 10 * 1024 * 1024  # 10 MB
+
+    def __init__(self, output_fn=None, env_allowlist=None, url_allowlist=None,
+                 http_timeout=10):
         """
         output_fn: optional callable(text, kind) for all output.
         env_allowlist: optional collection of env var names that sniff_env may read.
@@ -104,6 +112,11 @@ class Interpreter:
               _ENV_SENSITIVE_PATTERNS are blocked.
             - A set/list: ONLY the listed names are readable; everything else
               (including non-sensitive vars) is blocked.
+        url_allowlist: optional collection of allowed URL host patterns for HTTP.
+            - None (default): any http/https URL is allowed.
+            - A set/list: ONLY URLs whose host matches an entry are allowed.
+              e.g. {"api.example.com", "localhost"}
+        http_timeout: default timeout in seconds for HTTP requests (max 30).
         """
         self.variables: dict = {}
         self.functions: dict = {}
@@ -119,6 +132,10 @@ class Interpreter:
         self._env_allowlist: frozenset | None = (
             frozenset(env_allowlist) if env_allowlist is not None else None
         )
+        self._url_allowlist: frozenset | None = (
+            frozenset(url_allowlist) if url_allowlist is not None else None
+        )
+        self._http_timeout: int = min(int(http_timeout), self.MAX_HTTP_TIMEOUT)
 
     def _env_var_permitted(self, name: str) -> bool:
         """Return True if sniff_env is allowed to read this env var name."""
@@ -127,6 +144,59 @@ class Interpreter:
         # Default mode: block names that look like secrets
         upper = name.upper()
         return not any(pattern in upper for pattern in self._ENV_SENSITIVE_PATTERNS)
+
+    def _validate_url(self, url: str, ln: int):
+        """Validate a URL for HTTP requests: scheme and optional host allowlist."""
+        try:
+            parsed = urllib.parse.urlparse(url)
+        except Exception:
+            raise CharlotteError(f"*confused sniff* That doesn't look like a URL: \"{url}\"", ln)
+        if parsed.scheme not in ("http", "https"):
+            raise CharlotteError(
+                f"*protective growl* Only http:// and https:// URLs are allowed, "
+                f"not \"{parsed.scheme}://\"!", ln
+            )
+        if not parsed.hostname:
+            raise CharlotteError(f"*confused sniff* URL has no host: \"{url}\"", ln)
+        if self._url_allowlist is not None and parsed.hostname not in self._url_allowlist:
+            raise CharlotteError(
+                f"*protective growl* Host \"{parsed.hostname}\" is not on the "
+                f"allowed list!", ln
+            )
+
+    def _http_request(self, url: str, method: str, data=None, headers=None, ln: int = 0):
+        """Perform an HTTP request and return a collar (dict) with status, body, headers."""
+        self._validate_url(url, ln)
+        req_headers = {"User-Agent": "CharlotteLang/4.1"}
+        if headers and isinstance(headers, dict):
+            req_headers.update({str(k): str(v) for k, v in headers.items()})
+        body_bytes = None
+        if data is not None:
+            body_bytes = str(data).encode("utf-8")
+            if "Content-Type" not in req_headers:
+                req_headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
+                raw = resp.read(self.MAX_HTTP_RESPONSE)
+                charset = resp.headers.get_content_charset() or "utf-8"
+                return {
+                    "status": resp.status,
+                    "body": raw.decode(charset, errors="replace"),
+                    "headers": dict(resp.headers.items()),
+                }
+        except urllib.error.HTTPError as e:
+            raw = e.read(self.MAX_HTTP_RESPONSE) if e.fp else b""
+            charset = e.headers.get_content_charset() or "utf-8" if e.headers else "utf-8"
+            return {
+                "status": e.code,
+                "body": raw.decode(charset, errors="replace"),
+                "headers": dict(e.headers.items()) if e.headers else {},
+            }
+        except urllib.error.URLError as e:
+            raise CharlotteError(f"*whimpers* Could not reach \"{url}\": {e.reason}", ln)
+        except Exception as e:
+            raise CharlotteError(f"*whimpers* HTTP request failed: {e}", ln)
 
     def run(self, source: str, source_path: str = None):
         """Run a CharlotteLang program from source string, resetting all state first."""
@@ -808,9 +878,20 @@ class Interpreter:
         except ValueError:
             pass
 
-        # Parenthesized expression
+        # Parenthesized expression — only strip if the opening ( matches the closing )
         if expr.startswith("(") and expr.endswith(")"):
-            return self._evaluate(expr[1:-1], ln)
+            depth = 0
+            matches_end = True
+            for _i, _ch in enumerate(expr):
+                if _ch == "(":
+                    depth += 1
+                elif _ch == ")":
+                    depth -= 1
+                if depth == 0 and _i < len(expr) - 1:
+                    matches_end = False
+                    break
+            if matches_end:
+                return self._evaluate(expr[1:-1], ln)
 
         # Indexing and slicing: name[idx], name[start:stop], name[start:stop:step]
         if "[" in expr and expr.endswith("]") and not expr.startswith("bunny[") and not expr.startswith("collar{"):
@@ -1028,13 +1109,6 @@ class Interpreter:
                     return left + right
                 return left - right
 
-        # Arithmetic: ** (power) — higher precedence, right-to-left
-        idx = self._find_operator(expr, " ** ")
-        if idx != -1:
-            left = self._evaluate(expr[:idx], ln)
-            right = self._evaluate(expr[idx + 4:], ln)
-            return left ** right
-
         # Arithmetic: * / // %
         for op in (" // ", " / ", " * ", " % "):
             idx = self._rfind_operator(expr, op)
@@ -1054,6 +1128,13 @@ class Interpreter:
                 if op == " % ":
                     return left % right
                 return left / right
+
+        # Arithmetic: ** (power) — highest arithmetic precedence, right-to-left
+        idx = self._find_operator(expr, " ** ")
+        if idx != -1:
+            left = self._evaluate(expr[:idx], ln)
+            right = self._evaluate(expr[idx + 4:], ln)
+            return left ** right
 
         # Built-in functions
         if expr.startswith("howBig(") and expr.endswith(")"):
@@ -1148,6 +1229,41 @@ class Interpreter:
             prompt_val = self._evaluate(expr[4:-1], ln)
             return input(str(prompt_val))
 
+        # dig_up(url) / dig_up(url, headers) — HTTP GET request
+        if expr.startswith("dig_up(") and expr.endswith(")"):
+            args = self._parse_args(expr[7:-1])
+            if not args:
+                raise CharlotteError("dig_up needs a URL!", ln)
+            url = str(self._evaluate(args[0].strip(), ln))
+            headers = self._evaluate(args[1].strip(), ln) if len(args) > 1 else None
+            return self._http_request(url, "GET", headers=headers, ln=ln)
+
+        # bury(url, data) / bury(url, data, headers) — HTTP POST request
+        if expr.startswith("bury(") and expr.endswith(")"):
+            args = self._parse_args(expr[5:-1])
+            if len(args) < 2:
+                raise CharlotteError("bury needs a URL and data!", ln)
+            url = str(self._evaluate(args[0].strip(), ln))
+            data = self._evaluate(args[1].strip(), ln)
+            headers = self._evaluate(args[2].strip(), ln) if len(args) > 2 else None
+            return self._http_request(url, "POST", data=data, headers=headers, ln=ln)
+
+        # chew_json(string) — parse JSON string into collar/bunny/value
+        if expr.startswith("chew_json(") and expr.endswith(")"):
+            raw = str(self._evaluate(expr[10:-1], ln))
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise CharlotteError(f"*confused chewing* Invalid JSON: {e}", ln)
+
+        # yap_json(value) — serialize collar/bunny/value to JSON string
+        if expr.startswith("yap_json(") and expr.endswith(")"):
+            val = self._evaluate(expr[9:-1], ln)
+            try:
+                return json.dumps(self._to_json_compatible(val))
+            except (TypeError, ValueError) as e:
+                raise CharlotteError(f"*confused yapping* Can't convert to JSON: {e}", ln)
+
         # User function call
         if "(" in expr and expr.endswith(")"):
             paren_pos = expr.index("(")
@@ -1185,11 +1301,21 @@ class Interpreter:
         return -1
 
     def _is_truthy(self, val) -> bool:
-        if val is None or val is False or val == 0 or val == "" or val == "stranger":
+        if val is None or val is False or val == 0 or val == "":
             return False
         if isinstance(val, (list, dict)) and len(val) == 0:
             return False
         return True
+
+    def _to_json_compatible(self, val):
+        """Convert a CharlotteLang value to a JSON-serializable Python object."""
+        if val is None or isinstance(val, (bool, int, float, str)):
+            return val
+        if isinstance(val, list):
+            return [self._to_json_compatible(item) for item in val]
+        if isinstance(val, dict):
+            return {str(k): self._to_json_compatible(v) for k, v in val.items()}
+        return str(val)
 
 
 # ─── REPL ──────────────────────────────────────────────────
@@ -1340,6 +1466,15 @@ def print_quick_ref():
 │  squirrel(a, b)          → random int a..b (inclusive)   │
 │  nap(seconds)            → sleep                         │
 │  sniff_env("VAR")        → get env variable or napping   │
+│                                                          │
+│  dig_up(url)             → HTTP GET → collar{status,     │
+│                            body, headers}                │
+│  dig_up(url, headers)    → GET with custom headers       │
+│  bury(url, data)         → HTTP POST → same collar       │
+│  bury(url, data, headers)→ POST with custom headers      │
+│  chew_json(string)       → parse JSON → collar/bunny     │
+│  yap_json(value)         → serialize to JSON string      │
+│                                                          │
 │  woof this is a comment  → comment (always)              │
 │  sniff this is ignored   → comment (only without colon)  │
 │  a ~ b                   → string concat                 │

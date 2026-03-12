@@ -179,6 +179,44 @@ snag "helpers.bark"
 | `max(a, b)` / `max(list)` | `max(a, b)` | Maximum value |
 | `beg("prompt")` | `input("prompt")` | Read user input from stdin |
 
+### HTTP & JSON
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `dig_up(url)` | `urllib.request.urlopen(url)` | HTTP GET — returns collar with `status`, `body`, `headers` |
+| `dig_up(url, headers)` | *(with headers dict)* | HTTP GET with custom headers |
+| `bury(url, data)` | *(POST request)* | HTTP POST — returns same response collar |
+| `bury(url, data, headers)` | *(with headers dict)* | HTTP POST with custom headers |
+| `chew_json(string)` | `json.loads(string)` | Parse JSON string → collar/bunny/value |
+| `yap_json(value)` | `json.dumps(value)` | Serialize collar/bunny/value → JSON string |
+
+**Response collar format:** Every `dig_up`/`bury` call returns a collar (dict) with three keys:
+- `"status"` — HTTP status code (e.g. `200`, `404`)
+- `"body"` — response body as a string
+- `"headers"` — response headers as a collar
+
+```
+woof Fetch data from an API
+fetch resp = dig_up("https://api.example.com/dogs")
+sniff resp["status"] == 200:
+  fetch dogs = chew_json(resp["body"])
+  bark f"Found {dogs.toys} dogs!"
+
+woof Post JSON data
+fetch payload = yap_json(collar{"name": "Charlotte", "breed": "chihuahua"})
+fetch result = bury("https://api.example.com/dogs", payload)
+bark f"Created with status: {result['status']}"
+
+woof Custom headers (e.g. auth)
+fetch headers = collar{"Authorization": "Bearer my-token"}
+fetch resp = dig_up("https://api.example.com/me", headers)
+
+woof Error handling
+careful:
+  fetch resp = dig_up("https://unreachable.example.com")
+oops e:
+  bark f"Request failed: {e}"
+```
+
 ### String Methods
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
@@ -232,22 +270,37 @@ See the `examples/` directory:
 
 ## Security
 
-CharlotteLang is designed for trusted personal use. Two protections are built in:
+CharlotteLang is designed for trusted personal use. Several protections are built in:
 
 **`snag` sandbox** — import statements can only load `.bark` files within the same directory as the running script (or its subdirectories). Path traversal (`../`) and absolute paths outside the project tree are blocked.
 
 **`sniff_env` blocklist** — environment variable names containing sensitive substrings (`SECRET`, `PASSWORD`, `TOKEN`, `API_KEY`, `ACCESS_KEY`, `CREDENTIAL`, `PRIVATE`, etc.) are blocked by default and raise a `CharlotteError`. This prevents `.bark` scripts from accidentally (or maliciously) leaking secrets from the process environment.
 
-For programmatic use, the `Interpreter` class accepts an `env_allowlist` parameter:
+**HTTP restrictions** — `dig_up` and `bury` enforce several safeguards:
+- **Scheme restriction** — only `http://` and `https://` URLs are allowed; `file://`, `ftp://`, etc. are blocked.
+- **Timeout** — requests time out after 10 seconds by default (configurable, max 30s).
+- **Response size cap** — responses are limited to 10 MB to prevent memory exhaustion.
+- **Optional host allowlist** — restrict which hosts scripts can contact (see below).
+
+For programmatic use, the `Interpreter` class accepts security parameters:
 
 ```python
-# Only permit specific vars; block everything else (including non-sensitive ones)
+# Only permit specific env vars; block everything else
 interp = Interpreter(env_allowlist=["HOME", "PATH", "LANG"])
 
 # Block all env access
 interp = Interpreter(env_allowlist=[])
 
-# Default: non-sensitive vars allowed, sensitive patterns blocked
+# Only allow HTTP to specific hosts
+interp = Interpreter(url_allowlist=["api.example.com", "localhost"])
+
+# Block all HTTP (empty allowlist)
+interp = Interpreter(url_allowlist=[])
+
+# Custom timeout (max 30 seconds)
+interp = Interpreter(http_timeout=5)
+
+# Default: non-sensitive env vars allowed, any http/https URL allowed
 interp = Interpreter()
 ```
 

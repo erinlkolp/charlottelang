@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from charlotte import Interpreter, CharlotteError, parse_lines
 import tempfile
+import urllib.error
 
 
 # ─── Test Helpers ───────────────────────────────────────────
@@ -1907,3 +1908,286 @@ class TestSnagSecurity:
 
         errors = self._run_file(src, str(main))
         assert len(errors) == 1
+
+
+# ─── Bug Fix Regression Tests ──────────────────────────────
+
+class TestParenthesizedExpressions:
+    """Regression tests for parenthesized expression stripping (bug fix)."""
+
+    def test_grouped_multiplication(self):
+        assert only('bark (1 + 2) * (3 + 4)') == "21"
+
+    def test_grouped_addition(self):
+        assert only('bark (2 * 3) + (4 * 5)') == "26"
+
+    def test_nested_groups(self):
+        assert only('bark ((1 + 2) * 3)') == "9"
+
+    def test_simple_parens_still_work(self):
+        assert only('bark (10 + 5)') == "15"
+
+    def test_parens_in_fetch(self):
+        assert only('fetch x = (2 + 3) * (4 + 1)\nbark x') == "25"
+
+
+class TestPowerPrecedence:
+    """Regression tests for ** operator precedence (bug fix)."""
+
+    def test_power_before_multiply(self):
+        assert only('bark 2 ** 3 * 4') == "32"
+
+    def test_multiply_before_power(self):
+        assert only('bark 4 * 2 ** 3') == "32"
+
+    def test_power_before_add(self):
+        assert only('bark 1 + 2 ** 3') == "9"
+
+    def test_power_right_associative(self):
+        # 2 ** 3 ** 2 should be 2 ** (3 ** 2) = 2 ** 9 = 512
+        assert only('bark 2 ** 3 ** 2') == "512"
+
+    def test_power_with_parens(self):
+        assert only('bark (2 ** 3) * (2 ** 2)') == "32"
+
+
+class TestStrangerStringTruthiness:
+    """Regression tests for string 'stranger' no longer being falsy (bug fix)."""
+
+    def test_stranger_string_is_truthy(self):
+        result = only('fetch name = "stranger"\nsniff name:\n  bark "yes"\nelse pout:\n  bark "no"')
+        assert result == "yes"
+
+    def test_stranger_keyword_still_falsy(self):
+        result = only('fetch val = stranger\nsniff val:\n  bark "yes"\nelse pout:\n  bark "no"')
+        assert result == "no"
+
+    def test_stranger_string_in_condition(self):
+        assert only('sniff "stranger" != stranger:\n  bark "different"\nelse pout:\n  bark "same"') == "different"
+
+
+# ─── JSON Built-in Tests ───────────────────────────────────
+
+class TestJsonBuiltins:
+    """Tests for chew_json() and yap_json() built-ins."""
+
+    def test_chew_json_object(self):
+        assert only('fetch data = chew_json("{\\\"name\\\": \\\"Charlotte\\\"}")\nbark data["name"]') == "Charlotte"
+
+    def test_chew_json_array(self):
+        assert only('fetch data = chew_json("[1, 2, 3]")\nbark data[1]') == "2"
+
+    def test_chew_json_string(self):
+        assert only('bark chew_json("\\\"hello\\\"")') == "hello"
+
+    def test_chew_json_number(self):
+        assert only('bark chew_json("42")') == "42"
+
+    def test_chew_json_bool_and_null(self):
+        result = run('fetch d = chew_json("{\\\"a\\\": true, \\\"b\\\": false, \\\"c\\\": null}")\nbark d["a"]\nbark d["b"]\nbark d["c"]')
+        assert result == ["True", "False", "None"]
+
+    def test_chew_json_invalid(self):
+        errors = run_errors('bark chew_json("not json")')
+        assert len(errors) == 1
+        assert "Invalid JSON" in errors[0]
+
+    def test_yap_json_collar(self):
+        result = only('fetch d = collar{"name": "Charlotte"}\nbark yap_json(d)')
+        parsed = __import__("json").loads(result)
+        assert parsed == {"name": "Charlotte"}
+
+    def test_yap_json_bunny(self):
+        result = only('fetch arr = bunny[1, 2, 3]\nbark yap_json(arr)')
+        parsed = __import__("json").loads(result)
+        assert parsed == [1, 2, 3]
+
+    def test_yap_json_string(self):
+        assert only('bark yap_json("hello")') == '"hello"'
+
+    def test_yap_json_number(self):
+        assert only('bark yap_json(42)') == "42"
+
+    def test_yap_json_nested(self):
+        result = only('fetch d = collar{"items": bunny[1, 2], "ok": loyal}\nbark yap_json(d)')
+        parsed = __import__("json").loads(result)
+        assert parsed == {"items": [1, 2], "ok": True}
+
+    def test_yap_json_napping(self):
+        assert only('bark yap_json(napping)') == "null"
+
+    def test_roundtrip(self):
+        src = 'fetch original = collar{"x": 10, "y": bunny[1, 2]}\nfetch json_str = yap_json(original)\nfetch restored = chew_json(json_str)\nbark restored["x"]'
+        assert only(src) == "10"
+
+
+# ─── HTTP Built-in Tests ──────────────────────────────────
+
+from unittest.mock import patch, MagicMock
+import io
+
+def _mock_response(body="", status=200, headers=None):
+    """Create a mock urllib response object."""
+    resp = MagicMock()
+    resp.status = status
+    body_bytes = body.encode("utf-8")
+    resp.read = MagicMock(return_value=body_bytes)
+    mock_headers = MagicMock()
+    mock_headers.get_content_charset = MagicMock(return_value="utf-8")
+    mock_headers.items = MagicMock(return_value=(headers or {}).items())
+    resp.headers = mock_headers
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+class TestHTTPDigUp:
+    """Tests for dig_up() (HTTP GET) built-in."""
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_basic_get(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
+        result = run('fetch resp = dig_up("https://example.com/api")\nbark resp["status"]')
+        assert result == ["200"]
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_get_body(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response("hello world", 200)
+        assert only('fetch resp = dig_up("https://example.com")\nbark resp["body"]') == "hello world"
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_get_with_headers(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
+        src = 'fetch h = collar{"Authorization": "Bearer abc"}\nfetch resp = dig_up("https://example.com/api", h)\nbark resp["status"]'
+        assert only(src) == "200"
+        # Verify the Authorization header was passed
+        req = mock_urlopen.call_args[0][0]
+        assert req.get_header("Authorization") == "Bearer abc"
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_get_parse_json_response(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response('{"name": "Charlotte", "age": 5}', 200)
+        src = 'fetch resp = dig_up("https://example.com/api")\nfetch data = chew_json(resp["body"])\nbark data["name"]'
+        assert only(src) == "Charlotte"
+
+    def test_get_no_args(self):
+        errors = run_errors('bark dig_up()')
+        assert len(errors) == 1
+        assert "needs a URL" in errors[0]
+
+    def test_get_bad_scheme(self):
+        errors = run_errors('bark dig_up("file:///etc/passwd")')
+        assert len(errors) == 1
+        assert "http" in errors[0].lower() or "https" in errors[0].lower()
+
+    def test_get_ftp_blocked(self):
+        errors = run_errors('bark dig_up("ftp://example.com/file")')
+        assert len(errors) == 1
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_get_error_response(self, mock_urlopen):
+        err = urllib.error.HTTPError(
+            "https://example.com/missing", 404, "Not Found", {}, io.BytesIO(b"not found")
+        )
+        mock_urlopen.side_effect = err
+        result = only('fetch resp = dig_up("https://example.com/missing")\nbark resp["status"]')
+        assert result == "404"
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_get_connection_error(self, mock_urlopen):
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
+        errors = run_errors('fetch resp = dig_up("https://example.com")')
+        assert len(errors) == 1
+        assert "Could not reach" in errors[0]
+
+
+class TestHTTPBury:
+    """Tests for bury() (HTTP POST) built-in."""
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_basic_post(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response('{"id": 1}', 201)
+        src = 'fetch body = yap_json(collar{"name": "Charlotte"})\nfetch resp = bury("https://example.com/api", body)\nbark resp["status"]'
+        assert only(src) == "201"
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_post_sends_data(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
+        src = 'fetch body = yap_json(collar{"key": "val"})\nfetch resp = bury("https://example.com/api", body)'
+        run(src)
+        req = mock_urlopen.call_args[0][0]
+        assert req.method == "POST"
+        assert b'"key"' in req.data
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_post_with_custom_headers(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response("ok", 200)
+        src = ('fetch h = collar{"X-Custom": "test123"}\n'
+               'fetch resp = bury("https://example.com/api", "data", h)\n'
+               'bark resp["status"]')
+        assert only(src) == "200"
+        req = mock_urlopen.call_args[0][0]
+        assert req.get_header("X-custom") == "test123"
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_post_default_content_type(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response("ok", 200)
+        run('fetch resp = bury("https://example.com/api", "test")')
+        req = mock_urlopen.call_args[0][0]
+        assert req.get_header("Content-type") == "application/json"
+
+    def test_post_too_few_args(self):
+        errors = run_errors('bark bury("https://example.com")')
+        assert len(errors) == 1
+        assert "needs a URL and data" in errors[0]
+
+
+class TestHTTPUrlAllowlist:
+    """Tests for url_allowlist security restriction."""
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_allowed_host(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_response("ok", 200)
+        outputs = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": outputs.append(text),
+            url_allowlist={"api.example.com"}
+        )
+        interp.run('fetch resp = dig_up("https://api.example.com/data")\nbark resp["status"]')
+        assert outputs == ["200"]
+
+    def test_blocked_host(self):
+        errors = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": errors.append(text) if kind == "error" else None,
+            url_allowlist={"api.example.com"}
+        )
+        interp.run('fetch resp = dig_up("https://evil.com/steal")')
+        assert len(errors) == 1
+        assert "not on the allowed list" in errors[0]
+
+    def test_no_allowlist_permits_any_https(self):
+        """Without url_allowlist, scheme validation still works but host is unrestricted."""
+        errors = run_errors('bark dig_up("file:///etc/passwd")')
+        assert len(errors) == 1
+        assert "http" in errors[0].lower() or "https" in errors[0].lower()
+
+
+class TestHTTPWithCareful:
+    """Tests for HTTP functions used with careful/oops error handling."""
+
+    @patch("charlotte.urllib.request.urlopen")
+    def test_catch_connection_error(self, mock_urlopen):
+        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
+        src = ('careful:\n'
+               '  fetch resp = dig_up("https://example.com")\n'
+               'oops e:\n'
+               '  bark "caught"\n')
+        assert only(src) == "caught"
+
+    def test_catch_bad_scheme(self):
+        src = ('careful:\n'
+               '  fetch resp = dig_up("ftp://bad.com")\n'
+               'oops e:\n'
+               '  bark "caught"\n')
+        assert only(src) == "caught"
