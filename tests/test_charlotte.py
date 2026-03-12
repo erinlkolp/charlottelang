@@ -2191,3 +2191,165 @@ class TestHTTPWithCareful:
                'oops e:\n'
                '  bark "caught"\n')
         assert only(src) == "caught"
+
+
+# ─── Tests for bug fixes and new features ────────────────────
+
+class TestNestedIndexing:
+    """Bug fix: arr[0][1] and deeper chained indexing."""
+
+    def test_two_level_list(self):
+        src = ('fetch mat = bunny[bunny[1, 2], bunny[3, 4]]\n'
+               'bark mat[0][1]\n')
+        assert only(src) == "2"
+
+    def test_two_level_list_second_row(self):
+        src = ('fetch mat = bunny[bunny[1, 2], bunny[3, 4]]\n'
+               'bark mat[1][0]\n')
+        assert only(src) == "3"
+
+    def test_three_level_list(self):
+        src = ('fetch cube = bunny[bunny[bunny[7]]]\n'
+               'bark cube[0][0][0]\n')
+        assert only(src) == "7"
+
+    def test_nested_dict_then_list(self):
+        src = ('fetch d = collar{"nums": bunny[10, 20, 30]}\n'
+               'bark d["nums"][1]\n')
+        assert only(src) == "20"
+
+    def test_chained_index_in_expression(self):
+        src = ('fetch rows = bunny[bunny[1, 2], bunny[3, 4]]\n'
+               'fetch x = rows[0][0] + rows[1][1]\n'
+               'bark x\n')
+        assert only(src) == "5"
+
+    def test_error_on_oob_chained(self):
+        errors = run_errors('fetch arr = bunny[bunny[1]]\nbark arr[0][99]\n')
+        assert errors and "out of bounds" in errors[0]
+
+
+class TestUnaryMinus:
+    """Bug fix: -variable and -expression negation."""
+
+    def test_negate_variable(self):
+        src = 'fetch x = 5\nbark -x\n'
+        assert only(src) == "-5"
+
+    def test_negate_zero(self):
+        src = 'fetch x = 0\nbark -x\n'
+        assert only(src) == "0"
+
+    def test_negate_negative_variable(self):
+        src = 'fetch x = -3\nbark -x\n'
+        assert only(src) == "3"
+
+    def test_negate_expression(self):
+        src = 'fetch a = 2\nfetch b = 3\nbark -(a + b)\n'
+        assert only(src) == "-5"
+
+    def test_negate_in_arithmetic(self):
+        src = 'fetch x = 4\nbark 10 + -x\n'
+        assert only(src) == "6"
+
+    def test_negate_function_call(self):
+        src = ('teach trick double(n):\n'
+               '  rollover n * 2\n'
+               'bark -double(5)\n')
+        assert only(src) == "-10"
+
+    def test_literal_negative_still_works(self):
+        assert only('bark -7\n') == "-7"
+
+
+class TestOOBListAssignment:
+    """Bug fix: out-of-bounds list assignment now gives CharlotteError."""
+
+    def test_oob_assign_gives_charlotte_error(self):
+        errors = run_errors('fetch arr = bunny[1, 2]\narr[5] = 99\n')
+        assert errors
+        assert "🐾" in errors[0]
+        assert "index" in errors[0].lower() or "assign" in errors[0].lower()
+
+    def test_valid_assignment_still_works(self):
+        src = 'fetch arr = bunny[1, 2, 3]\narr[1] = 99\nbark arr[1]\n'
+        assert only(src) == "99"
+
+    def test_non_integer_key_gives_charlotte_error(self):
+        errors = run_errors('fetch arr = bunny[1, 2]\narr["bad"] = 99\n')
+        assert errors
+        assert "🐾" in errors[0]
+
+
+class TestFStringQuotes:
+    """Bug fix: f'...' single-quoted f-strings."""
+
+    def test_single_quoted_fstring(self):
+        src = 'fetch name = "world"\nbark f\'hello {name}\'\n'
+        assert only(src) == "hello world"
+
+    def test_single_quoted_fstring_arithmetic(self):
+        src = 'fetch x = 3\nbark f\'result: {x * 2}\'\n'
+        assert only(src) == "result: 6"
+
+    def test_double_quoted_fstring_still_works(self):
+        src = 'fetch x = 42\nbark f"value is {x}"\n'
+        assert only(src) == "value is 42"
+
+    def test_single_quoted_fstring_multiple_interpolations(self):
+        src = 'fetch a = "foo"\nfetch b = "bar"\nbark f\'{a} and {b}\'\n'
+        assert only(src) == "foo and bar"
+
+
+class TestNegativeLoopCount:
+    """Bug fix: negative zoomies count gives specific error."""
+
+    def test_negative_count_error_message(self):
+        errors = run_errors('zoomies -1 times:\n  bark "hi"\n')
+        assert errors
+        assert "negative" in errors[0].lower()
+
+    def test_zero_count_is_fine(self):
+        result = run('zoomies 0 times:\n  bark "hi"\n')
+        assert result == []
+
+    def test_non_number_count_error(self):
+        errors = run_errors('fetch s = "abc"\nzoomies s times:\n  bark "hi"\n')
+        assert errors
+        assert "number" in errors[0].lower()
+
+
+class TestFloorCeil:
+    """New feature: floor() and ceil() built-in math functions."""
+
+    def test_floor_positive(self):
+        assert only('bark floor(3.7)\n') == "3"
+
+    def test_floor_negative(self):
+        assert only('bark floor(-1.2)\n') == "-2"
+
+    def test_floor_whole_number(self):
+        assert only('bark floor(4.0)\n') == "4"
+
+    def test_ceil_positive(self):
+        assert only('bark ceil(3.2)\n') == "4"
+
+    def test_ceil_negative(self):
+        assert only('bark ceil(-1.8)\n') == "-1"
+
+    def test_ceil_whole_number(self):
+        assert only('bark ceil(5.0)\n') == "5"
+
+    def test_floor_with_variable(self):
+        src = 'fetch x = 2.9\nbark floor(x)\n'
+        assert only(src) == "2"
+
+    def test_ceil_with_expression(self):
+        src = 'fetch x = 1.1\nbark ceil(x + 0.5)\n'
+        assert only(src) == "2"
+
+    def test_floor_integer(self):
+        assert only('bark floor(5)\n') == "5"
+
+    def test_ceil_integer(self):
+        assert only('bark ceil(5)\n') == "5"

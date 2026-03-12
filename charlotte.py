@@ -16,6 +16,7 @@ import random
 import time
 import copy
 import json
+import math
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -349,7 +350,17 @@ class Interpreter:
                         if isinstance(container, dict):
                             container[key] = val
                         elif isinstance(container, list):
-                            container[int(key)] = val
+                            try:
+                                idx = int(key)
+                            except (ValueError, TypeError):
+                                raise CharlotteError(
+                                    f"*confused sniff* List index must be a number, got: {key!r}", ln)
+                            try:
+                                container[idx] = val
+                            except IndexError:
+                                raise CharlotteError(
+                                    f"*paws at empty bunny* Can't assign to index {idx}! "
+                                    f"List has {len(container)} items.", ln)
                         i += 1
                         continue
                 if target.isidentifier() and target in self.variables:
@@ -475,8 +486,13 @@ class Interpreter:
 
     def _handle_for_loop(self, text, lines, i, indent, ln):
         expr = text[8:-7].strip()  # strip "zoomies " and " times:"
-        times = int(self._evaluate(expr, ln))
-        if times < 0 or times > self.MAX_LOOPS:
+        try:
+            times = int(self._evaluate(expr, ln))
+        except (ValueError, TypeError):
+            raise CharlotteError("Zoomies count must be a number! *tilts head*", ln)
+        if times < 0:
+            raise CharlotteError("Zoomies count can't be negative! *sits and stares*", ln)
+        if times > self.MAX_LOOPS:
             raise CharlotteError(f"Too many zoomies! Max {self.MAX_LOOPS}.", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
         for z in range(times):
@@ -815,8 +831,8 @@ class Interpreter:
         if self._is_complete_string(expr):
             return self._process_escapes(expr[1:-1])
 
-        # f-strings
-        if expr.startswith('f"') and expr.endswith('"'):
+        # f-strings: f"..." or f'...'
+        if (expr.startswith('f"') and expr.endswith('"')) or (expr.startswith("f'") and expr.endswith("'")):
             inner = expr[2:-1]
             result = []
             i = 0
@@ -920,13 +936,46 @@ class Interpreter:
             if matches_end:
                 return self._evaluate(expr[1:-1], ln)
 
-        # Indexing and slicing: name[idx], name[start:stop], name[start:stop:step]
+        # Indexing and slicing: expr[idx], expr[start:stop], expr[start:stop:step]
+        # Supports chained access like arr[0][1] by finding the last top-level [...].
+        # We skip this block if there are top-level binary operators in the expression
+        # (e.g. arr[0] + arr[1]) — those are handled by the arithmetic handlers below.
         if "[" in expr and expr.endswith("]") and not expr.startswith("bunny[") and not expr.startswith("collar{"):
-            bracket_pos = expr.index("[")
-            name = expr[:bracket_pos]
-            if name in self.variables:
-                key_expr = expr[bracket_pos + 1:-1]
-                container = self.variables[name]
+            # Skip if top-level binary operators are present (let arithmetic/comparison
+            # handlers split the expression first)
+            _has_top_level_op = False
+            for _test_op in (" + ", " - ", " * ", " / ", " // ", " ** ",
+                             " and ", " or ", " ~ ", " == ", " != ",
+                             " >= ", " <= ", " > ", " < ",
+                             " equals ", " not equals ",
+                             " is bigger than ", " is smaller than ",
+                             " in ", " not in "):
+                if self._find_operator(expr, _test_op) != -1:
+                    _has_top_level_op = True
+                    break
+            # Find the last top-level [ whose matching ] is the final char.
+            last_bracket_pos = -1
+            if not _has_top_level_op:
+                _depth = 0
+                _in_str = False
+                _str_ch = None
+                for _i, _ch in enumerate(expr):
+                    if not _in_str and _ch in ('"', "'"):
+                        _in_str = True
+                        _str_ch = _ch
+                    elif _in_str and _ch == _str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                        _in_str = False
+                    if not _in_str:
+                        if _ch == '[':
+                            if _depth == 0:
+                                last_bracket_pos = _i
+                            _depth += 1
+                        elif _ch == ']':
+                            _depth -= 1
+            if last_bracket_pos > 0:
+                base_expr = expr[:last_bracket_pos]
+                key_expr = expr[last_bracket_pos + 1:-1]
+                container = self._evaluate(base_expr, ln)
                 if ":" in key_expr:
                     parts = key_expr.split(":", 2)
                     start = int(self._evaluate(parts[0].strip(), ln)) if parts[0].strip() else None
@@ -1197,6 +1246,14 @@ class Interpreter:
         if expr.startswith("abs(") and expr.endswith(")"):
             return abs(self._evaluate(expr[4:-1], ln))
 
+        # floor(x) — round down to nearest integer
+        if expr.startswith("floor(") and expr.endswith(")"):
+            return math.floor(self._evaluate(expr[6:-1], ln))
+
+        # ceil(x) — round up to nearest integer
+        if expr.startswith("ceil(") and expr.endswith(")"):
+            return math.ceil(self._evaluate(expr[5:-1], ln))
+
         # round(x) / round(x, digits) — round a number
         if expr.startswith("round(") and expr.endswith(")"):
             args = self._parse_args(expr[6:-1])
@@ -1295,6 +1352,10 @@ class Interpreter:
             fname = expr[:paren_pos]
             if fname in self.functions:
                 return self._call_function(fname, expr[paren_pos + 1:-1], ln)
+
+        # Unary minus: -expr  (e.g. -x, -(a + b), -myFunc())
+        if expr.startswith("-") and len(expr) > 1:
+            return -self._evaluate(expr[1:], ln)
 
         # Variable lookup
         if expr in self.variables:
