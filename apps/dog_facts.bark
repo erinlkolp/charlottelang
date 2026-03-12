@@ -1,0 +1,52 @@
+woof ═══════════════════════════════════════════
+woof  Dog Fact Fetcher
+woof  Uses https://dogapi.dog/api/v2/facts
+woof ═══════════════════════════════════════════
+
+bark "🐾 Welcome to the Dog Fact Fetcher! 🐾"
+bark ""
+
+fetch running = loyal
+
+zoomies while running:
+  bark "How many dog facts do you want? (or type 0 to quit)"
+  fetch input = beg("> ")
+  fetch count = goodBoy(input)
+
+  sniff count equals 0:
+    fetch running = stranger
+    keep going
+
+  sniff count < 1:
+    bark "Please enter a number greater than 0!"
+    keep going
+
+  sniff count > 10:
+    bark "Let's keep it to 10 facts at a time!"
+    fetch count = 10
+
+  bark ""
+  bark f"Fetching {count} dog fact(s)..."
+  bark ""
+
+  fetch i = 1
+  zoomies count times:
+    careful:
+      fetch resp = dig_up("https://dogapi.dog/api/v2/facts")
+
+      sniff resp["status"] != 200:
+        bark f"Hmm, got status {resp["status"]} — something went wrong!"
+        keep going
+
+      fetch data = chew_json(resp["body"])
+      fetch text = data["data"][0]["attributes"]["body"]
+      bark f"  {i}. {text}"
+      fetch i = i + 1
+
+    oops e:
+      bark f"Oops! Couldn't fetch fact {i}: {e}"
+      fetch i = i + 1
+
+  bark ""
+
+bark "Thanks for learning about dogs! *wags tail*"
