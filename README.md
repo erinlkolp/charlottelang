@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v4.1
+# 🐕 CharlotteLang v4.2
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -66,7 +66,7 @@ charlotte run hello.bark
 | `list.give("item")` | `list.append("item")` | Append to list |
 | `loyal` / `stranger` | `True` / `False` | Booleans |
 | `napping` | `None` | Null value |
-| `f"hi {name}"` | `f"hi {name}"` | F-string interpolation |
+| `f"hi {name}"` or `f'hi {name}'` | `f"hi {name}"` | F-string interpolation (double or single quotes) |
 | `"line1\nline2"` | `"line1\nline2"` | Escape sequences (`\n` `\t` `\\` `\"`) |
 
 ### Arrays (Lists)
@@ -74,6 +74,7 @@ charlotte run hello.bark
 |-----------|--------|-------------|
 | `bunny[1, 2, 3]` | `[1, 2, 3]` | Array literal |
 | `arr[0]` | `arr[0]` | Index access |
+| `arr[0][1]` | `arr[0][1]` | Chained / nested index access |
 | `arr[-1]` | `arr[-1]` | Negative index (last element) |
 | `arr[1:3]` | `arr[1:3]` | Slice `[start:stop:step]` |
 | `arr.toys` | `len(arr)` | Length |
@@ -157,6 +158,7 @@ snag "helpers.bark"
 | `item in list` | `item in list` | Membership test (lists, dicts, strings) |
 | `item not in list` | `item not in list` | Negative membership test |
 | `+ - * / // % **` | `+ - * / // % **` | Arithmetic (`**` = power/exponent) |
+| `-x` | `-x` | Unary minus — negate any variable or expression |
 | `"ha" * 3` | `"ha" * 3` | String repetition → `"hahaha"` |
 
 ### Built-in Functions
@@ -178,6 +180,8 @@ snag "helpers.bark"
 | `min(a, b)` / `min(list)` | `min(a, b)` | Minimum value |
 | `max(a, b)` / `max(list)` | `max(a, b)` | Maximum value |
 | `beg("prompt")` | `input("prompt")` | Read user input from stdin |
+| `floor(x)` | `math.floor(x)` | Round down to nearest integer |
+| `ceil(x)` | `math.ceil(x)` | Round up to nearest integer |
 
 ### HTTP & JSON
 | Charlotte | Python | Description |

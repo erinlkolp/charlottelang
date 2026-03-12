@@ -1,8 +1,8 @@
-# CLAUDE.md — CharlotteLang Interpreter
+# CLAUDE.md — CharlotteLang Interpreter v4.2
 
 ## Project Overview
 
-CharlotteLang is a dog-themed programming language interpreter written in Python. The entire interpreter lives in a single file (`charlotte.py`) with no external dependencies beyond Python 3.10+.
+CharlotteLang is a dog-themed programming language interpreter written in Python. The entire interpreter lives in a single file (`charlotte.py`) with no external dependencies beyond Python 3.10+ stdlib.
 
 ## Quick Commands
 
@@ -72,12 +72,17 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `zoomies VAR through` | named foreach — `VAR` holds each item, `lap` holds index |
 | `loyal(x)` | convert to bool |
 | `abs(x)` | absolute value |
+| `floor(x)` | round down to nearest integer |
+| `ceil(x)` | round up to nearest integer |
 | `round(x, n)` | round a number |
 | `min(...)` / `max(...)` | min/max of args or a list |
 | `x ** y` | power/exponent |
+| `-x` | unary negation of any variable or expression |
 | `"s" * n` | string repetition |
 | `x not in collection` | negative membership test |
 | `a > b` / `a < b` | symbolic greater/less-than (aliases for `is bigger than` / `is smaller than`) |
+| `f'...'` | single-quoted f-string (equivalent to `f"..."`) |
+| `arr[i][j]` | chained / nested index access |
 
 ## Code Conventions
 
@@ -85,12 +90,12 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 - Dog-themed naming for all language keywords and error messages
 - Error messages use the 🐾 emoji prefix and playful dog personality
 - Example files use the `.bark` extension and live in `examples/`
-- No external dependencies — stdlib only (`copy` for scope isolation, `json` for JSON serialization, `urllib` for HTTP requests)
+- No external dependencies — stdlib only (`copy` for scope isolation, `json` for JSON serialization, `math` for `floor`/`ceil`, `urllib` for HTTP requests)
 - Python 3.10+ required (uses `match` statement type hints like `list[Line]`)
 
 ## Testing
 
-Run the full test suite with pytest (418 tests):
+Run the full test suite with pytest (451 tests):
 
 ```bash
 python -m pytest tests/
@@ -102,7 +107,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing, `dig_up`/`bury` HTTP requests, `chew_json`/`yap_json` JSON serialization, `url_allowlist` host restriction, parenthesized expression grouping, `**` operator precedence, `stranger` string truthiness). Example files are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing, `dig_up`/`bury` HTTP requests, `chew_json`/`yap_json` JSON serialization, `url_allowlist` host restriction, parenthesized expression grouping, `**` operator precedence, `stranger` string truthiness, chained indexing `arr[i][j]`, unary minus `-x`, `floor`/`ceil`, single-quoted f-strings `f'...'`, negative/non-numeric loop count errors). Example files are also smoke-tested.
 
 To manually verify examples:
 
