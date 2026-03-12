@@ -24,11 +24,13 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 1. **Exception classes** — `CharlotteError`, `CharlotteReturn`, `CharlotteBreak`, `CharlotteContinue`
 2. **Tokenizer** — `Line` class + `parse_lines()` function. Line-based (not token-based). Strips blanks and comments, tracks indentation.
 3. **Interpreter** — `Interpreter` class with:
+   - `run(source)` — resets all state then calls `execute()`
+   - `execute(source)` — runs source **without** resetting state (used by REPL for session continuity)
    - `_execute_block()` — main statement dispatcher
    - `_evaluate()` — recursive expression evaluator
    - `_handle_*()` methods for each statement type
-   - `_call_function()` for user-defined function calls
-4. **REPL** — `run_repl()` with buffer-based multi-line input
+   - `_call_function()` — calls user-defined functions with deep-copied scope isolation
+4. **REPL** — `run_repl()` with buffer-based multi-line input; uses `execute()` so variables persist across `.run` commands
 5. **CLI** — `main()` entry point with `run`, `repl`, `help` commands
 
 ## Language Keyword Mapping
@@ -66,6 +68,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `x ** y` | power/exponent |
 | `"s" * n` | string repetition |
 | `x not in collection` | negative membership test |
+| `a > b` / `a < b` | symbolic greater/less-than (aliases for `is bigger than` / `is smaller than`) |
 
 ## Code Conventions
 
@@ -73,12 +76,12 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 - Dog-themed naming for all language keywords and error messages
 - Error messages use the 🐾 emoji prefix and playful dog personality
 - Example files use the `.bark` extension and live in `examples/`
-- No external dependencies — stdlib only
+- No external dependencies — stdlib only (`copy` module used internally for function scope isolation)
 - Python 3.10+ required (uses `match` statement type hints like `list[Line]`)
 
 ## Testing
 
-Run the full test suite with pytest (325 tests):
+Run the full test suite with pytest (357 tests):
 
 ```bash
 python -m pytest tests/
@@ -90,7 +93,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr). Example files are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping). Example files are also smoke-tested.
 
 To manually verify examples:
 

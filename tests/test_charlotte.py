@@ -1490,3 +1490,246 @@ class TestQuickWins:
 
     def test_loyal_list_nonempty(self):
         assert only('bark loyal(bunny[1])') == "True"
+
+
+# ─── Fix: collar{} colon split respects nesting ─────────────
+
+class TestCollarColonSplit:
+    """collar{} key:value parsing must use depth-aware colon detection."""
+
+    def test_collar_with_slice_value(self):
+        # Value contains ":" inside brackets — naive index(":") split would break
+        src = (
+            'fetch arr = bunny[1, 2, 3, 4, 5]\n'
+            'fetch d = collar{"data": arr[1:3]}\n'
+            'bark d["data"]'
+        )
+        assert only(src) == "[2, 3]"
+
+    def test_collar_with_nested_collar(self):
+        # Nested collar as a value — verify outer key access works
+        src = (
+            'fetch d = collar{"outer": collar{"inner": 42}}\n'
+            'fetch inner = d["outer"]\n'
+            'bark inner["inner"]'
+        )
+        assert only(src) == "42"
+
+    def test_collar_value_contains_function_call(self):
+        # Value is a function call — colon must not appear as a false split
+        src = 'fetch d = collar{"key": goodBoy("3")}\nbark d["key"]'
+        assert only(src) == "3"
+
+    def test_collar_multiple_slice_values(self):
+        src = (
+            'fetch nums = bunny[10, 20, 30, 40, 50]\n'
+            'fetch d = collar{"first": nums[0:2], "last": nums[3:5]}\n'
+            'bark d["first"]'
+        )
+        assert only(src) == "[10, 20]"
+
+    def test_collar_normal_still_works(self):
+        src = 'fetch d = collar{"x": 1, "y": 2}\nbark d["x"]'
+        assert only(src) == "1"
+
+
+# ─── Fix: REPL execute() preserves state across calls ────────
+
+class TestReplStatePreservation:
+    """Interpreter.execute() must not reset variables between calls."""
+
+    def test_variable_persists_across_execute_calls(self):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        interp.execute('fetch x = 42')
+        interp.execute('bark x')
+        assert outputs == ["42"]
+
+    def test_multiple_variables_persist(self):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        interp.execute('fetch a = 10')
+        interp.execute('fetch b = 20')
+        interp.execute('bark a + b')
+        assert outputs == ["30"]
+
+    def test_function_persists_across_execute_calls(self):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        interp.execute('teach trick greet(who):\n  bark f"hello {who}"')
+        interp.execute('greet("Charlotte")')
+        assert outputs == ["hello Charlotte"]
+
+    def test_run_resets_state(self):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        interp.execute('fetch x = 99')
+        assert "x" in interp.variables
+        interp.run('bark "fresh start"')
+        # run() must have wiped the variable table
+        assert "x" not in interp.variables
+
+    def test_reassignment_persists(self):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        interp.execute('fetch counter = 0')
+        interp.execute('counter = counter + 1')
+        interp.execute('counter = counter + 1')
+        interp.execute('bark counter')
+        assert outputs == ["2"]
+
+
+# ─── Fix: function scope isolation (deep copy prevents mutation leak) ──
+
+class TestFunctionScopeIsolation:
+    """Mutations to lists inside functions must not affect the caller's copy."""
+
+    def test_list_mutation_inside_function_does_not_leak(self):
+        src = (
+            'fetch arr = bunny[1, 2, 3]\n'
+            'teach trick mutate(a):\n'
+            '  a.give(99)\n'
+            'mutate(arr)\n'
+            'bark arr.toys'
+        )
+        # arr should still have 3 items after calling mutate()
+        assert only(src) == "3"
+
+    def test_scalar_assignment_inside_function_does_not_leak(self):
+        src = (
+            'fetch x = 10\n'
+            'teach trick change():\n'
+            '  x = 999\n'
+            'change()\n'
+            'bark x'
+        )
+        assert only(src) == "10"
+
+    def test_scope_restored_after_function_error(self):
+        # If a function raises an error, the caller's scope must still be intact
+        src = (
+            'fetch x = 42\n'
+            'careful:\n'
+            '  teach trick boom():\n'
+            '    x = 999\n'
+            '    growl "oops"\n'
+            '  boom()\n'
+            'oops e:\n'
+            '  bark "caught"\n'
+            'bark x'
+        )
+        out = run(src)
+        assert "caught" in out
+        assert out[-1] == "42"
+
+    def test_nested_list_in_global_scope_not_modified(self):
+        src = (
+            'fetch data = bunny[1, 2, 3]\n'
+            'teach trick peek(lst):\n'
+            '  lst.give(4)\n'
+            '  bark lst.toys\n'
+            'peek(data)\n'
+            'bark data.toys'
+        )
+        out = run(src)
+        # Inside the function, lst has 4 items; outside, data still has 3
+        assert out == ["4", "3"]
+
+
+# ─── Fix: > and < comparison operators ──────────────────────
+
+class TestSymbolicComparisons:
+    """The symbolic > and < operators must work in all contexts."""
+
+    def test_greater_than_true(self):
+        assert only('bark loyal(5 > 3)') == "True"
+
+    def test_greater_than_false(self):
+        assert only('bark loyal(3 > 5)') == "False"
+
+    def test_less_than_true(self):
+        assert only('bark loyal(3 < 5)') == "True"
+
+    def test_less_than_false(self):
+        assert only('bark loyal(5 < 3)') == "False"
+
+    def test_greater_than_in_sniff(self):
+        src = 'fetch x = 10\nsniff x > 5:\n  bark "big"'
+        assert only(src) == "big"
+
+    def test_less_than_in_sniff(self):
+        src = 'fetch x = 2\nsniff x < 5:\n  bark "small"'
+        assert only(src) == "small"
+
+    def test_while_loop_with_gt(self):
+        src = 'fetch x = 3\nzoomies while x > 0:\n  bark x\n  x = x - 1'
+        assert run(src) == ["3", "2", "1"]
+
+    def test_while_loop_with_lt(self):
+        src = 'fetch x = 0\nzoomies while x < 3:\n  bark x\n  x = x + 1'
+        assert run(src) == ["0", "1", "2"]
+
+    def test_gt_does_not_match_gte(self):
+        # "5 >= 5" should match >= (True), not > (False)
+        assert only('bark loyal(5 >= 5)') == "True"
+
+    def test_lt_does_not_match_lte(self):
+        assert only('bark loyal(5 <= 5)') == "True"
+
+
+# ─── Fix: raw Python exceptions wrapped as CharlotteError ───
+
+class TestBoundedErrors:
+    """IndexError and ValueError from builtins must become CharlotteError."""
+
+    def test_list_index_out_of_bounds_is_charlotte_error(self):
+        errors = run_errors('fetch arr = bunny[1, 2, 3]\nbark arr[10]')
+        assert len(errors) == 1
+        assert "🐾" in errors[0]
+
+    def test_list_index_out_of_bounds_message(self):
+        errors = run_errors('fetch arr = bunny[1, 2, 3]\nbark arr[10]')
+        assert "out of bounds" in errors[0].lower() or "index" in errors[0].lower()
+
+    def test_string_index_out_of_bounds_is_charlotte_error(self):
+        errors = run_errors('fetch s = "hi"\nbark s[99]')
+        assert len(errors) == 1
+        assert "🐾" in errors[0]
+
+    def test_list_oob_catchable_with_careful(self):
+        src = (
+            'fetch arr = bunny[1, 2]\n'
+            'careful:\n'
+            '  bark arr[99]\n'
+            'oops e:\n'
+            '  bark "caught"'
+        )
+        assert only(src) == "caught"
+
+    def test_goodboy_bad_input_is_charlotte_error(self):
+        errors = run_errors('bark goodBoy("abc")')
+        assert len(errors) == 1
+        assert "🐾" in errors[0]
+
+    def test_treat_bad_input_is_charlotte_error(self):
+        errors = run_errors('bark treat("not a number")')
+        assert len(errors) == 1
+        assert "🐾" in errors[0]
+
+    def test_goodboy_bad_input_catchable(self):
+        src = (
+            'careful:\n'
+            '  bark goodBoy("nope")\n'
+            'oops e:\n'
+            '  bark "caught"'
+        )
+        assert only(src) == "caught"
+
+    def test_treat_bad_input_catchable(self):
+        src = (
+            'careful:\n'
+            '  bark treat("nope")\n'
+            'oops e:\n'
+            '  bark "caught"'
+        )
+        assert only(src) == "caught"
