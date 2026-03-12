@@ -35,7 +35,8 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 
 | Keyword | Meaning |
 |---------|---------|
-| `bark` | print |
+| `bark` | print to stdout (`bark` alone prints blank line) |
+| `howl` | print to stderr |
 | `growl` | raise error |
 | `fetch` | create variable |
 | `sniff` | if (ends with `:`) or legacy comment (no colon) |
@@ -77,7 +78,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 
 ## Testing
 
-Run the full test suite with pytest (305 tests):
+Run the full test suite with pytest (325 tests):
 
 ```bash
 python -m pytest tests/
@@ -89,7 +90,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`). Example files are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr). Example files are also smoke-tested.
 
 To manually verify examples:
 

@@ -90,7 +90,12 @@ class Interpreter:
     def __init__(self, output_fn=None):
         self.variables: dict = {}
         self.functions: dict = {}
-        self.output_fn = output_fn or (lambda text, kind="bark": print(text))
+        def _default_output(text, kind="bark"):
+            if kind == "howl":
+                print(text, file=sys.stderr)
+            else:
+                print(text)
+        self.output_fn = output_fn or _default_output
         self._imported_files: set = set()
         self._source_dir: str = os.getcwd()
 
@@ -146,9 +151,24 @@ class Interpreter:
                 continue
 
             # ── bark (print) ──
+            if text == "bark":
+                self.output_fn("", "bark")
+                i += 1
+                continue
             if text.startswith("bark "):
                 val = self._evaluate(text[5:], ln)
                 self.output_fn(str(val), "bark")
+                i += 1
+                continue
+
+            # ── howl (print to stderr) ──
+            if text == "howl":
+                self.output_fn("", "howl")
+                i += 1
+                continue
+            if text.startswith("howl "):
+                val = self._evaluate(text[5:], ln)
+                self.output_fn(str(val), "howl")
                 i += 1
                 continue
 
@@ -1178,7 +1198,9 @@ def print_quick_ref():
 ┌──────────────────────────────────────────────────────────┐
 │  🐕 CharlotteLang Quick Reference                        │
 ├──────────────────────────────────────────────────────────┤
-│  bark "hello"            → print                         │
+│  bark "hello"            → print to stdout               │
+│  bark                    → print blank line              │
+│  howl "oops"             → print to stderr               │
 │  fetch x = 10            → create variable               │
 │  x = 20                  → reassign variable             │
 │  growl "error!"          → throw error                   │
