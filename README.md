@@ -49,7 +49,10 @@ charlotte run hello.bark
 ### I/O
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
-| `bark "hello"` | `print("hello")` | Print to console |
+| `bark "hello"` | `print("hello")` | Print to stdout |
+| `bark` | `print()` | Print a blank line |
+| `howl "warning"` | `print("warning", file=sys.stderr)` | Print to stderr |
+| `howl` | `print(file=sys.stderr)` | Print blank line to stderr |
 | `growl "error"` | `raise Exception("error")` | Throw an error |
 
 ### Variables
@@ -104,6 +107,7 @@ charlotte run hello.bark
 | `else pout:` | `else:` | Else |
 | `zoomies 5 times:` | `for lap in range(5):` | For loop (`lap` = index) |
 | `zoomies through list:` | `for toy in list:` | For-each (`toy` = item, `lap` = index) |
+| `zoomies item through list:` | `for item in list:` | Named for-each (`item` = custom var, `lap` = index) |
 | `zoomies while x > 0:` | `while x > 0:` | While loop |
 | `shake off` | `break` | Break out of loop |
 | `keep going` | `continue` | Skip to next iteration |
