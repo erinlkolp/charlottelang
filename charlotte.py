@@ -331,7 +331,10 @@ class Interpreter:
 
             # ── fetch (variable creation) ──
             if text.startswith("fetch "):
-                i = self._handle_fetch(text, i, ln)
+                if re.match(r"^fetch \w+(?:\s*,\s*\w+)+ =", text):
+                    i = self._handle_fetch_destructure(text, i, ln)
+                else:
+                    i = self._handle_fetch(text, i, ln)
                 continue
 
             # ── reassignment: name = expr ──  (supports dict key assignment: name[key] = expr)
@@ -450,6 +453,12 @@ class Interpreter:
                 i += 1
                 continue
 
+            # ── mark_file() / append_file() as standalone statements ──
+            if (text.startswith("mark_file(") or text.startswith("append_file(")) and text.endswith(")"):
+                self._evaluate(text, ln)
+                i += 1
+                continue
+
             # ── function call ──
             if "(" in text and text.endswith(")"):
                 paren_pos = text.index("(")
@@ -482,6 +491,27 @@ class Interpreter:
         if not match:
             raise CharlotteError("*drops ball* — Use: fetch name = value", ln)
         self.variables[match.group(1)] = self._evaluate(match.group(2), ln)
+        return i + 1
+
+    def _handle_fetch_destructure(self, text, i, ln):
+        """Handle destructuring: fetch a, b, c = arr"""
+        m = re.match(r"^fetch (\w+(?:\s*,\s*\w+)+) = (.+)$", text)
+        if not m:
+            raise CharlotteError("*drops ball* — Use: fetch a, b, c = array", ln)
+        names = [n.strip() for n in m.group(1).split(",")]
+        val = self._evaluate(m.group(2), ln)
+        if not isinstance(val, list):
+            raise CharlotteError(
+                f"*confused sniff* Destructuring needs a bunny[] (array), "
+                f"got: {type(val).__name__}", ln
+            )
+        if len(names) != len(val):
+            raise CharlotteError(
+                f"*paws at bunny* Destructuring mismatch! "
+                f"Expected {len(names)} items, bunny has {len(val)}.", ln
+            )
+        for name, item in zip(names, val):
+            self.variables[name] = item
         return i + 1
 
     def _handle_for_loop(self, text, lines, i, indent, ln):
@@ -656,6 +686,22 @@ class Interpreter:
 
         return idx
 
+    def _resolve_sandboxed_path(self, path: str, ln: int) -> str:
+        """Resolve path relative to source_dir and verify it stays within the sandbox."""
+        if not isinstance(path, str):
+            raise CharlotteError("File path must be a string!", ln)
+        if not os.path.isabs(path):
+            path = os.path.join(self._source_dir, path)
+        path = os.path.realpath(path)
+        source_dir = os.path.realpath(self._source_dir)
+        allowed_prefix = source_dir.rstrip(os.sep) + os.sep
+        if path != source_dir and not path.startswith(allowed_prefix):
+            raise CharlotteError(
+                "*suspicious growl* File access is restricted to the project "
+                "directory — no escaping allowed!", ln
+            )
+        return path
+
     def _handle_import(self, text, i, ln):
         """Handle snag (import) statements."""
         path_expr = text[5:].strip()
@@ -664,20 +710,7 @@ class Interpreter:
         if not isinstance(path, str):
             raise CharlotteError("snag path must be a string!", ln)
 
-        # Resolve relative to source directory
-        if not os.path.isabs(path):
-            path = os.path.join(self._source_dir, path)
-        # Use realpath to canonicalise and resolve any symlinks before checking
-        path = os.path.realpath(path)
-        source_dir = os.path.realpath(self._source_dir)
-
-        # Security: imports must stay within the project directory subtree
-        allowed_prefix = source_dir.rstrip(os.sep) + os.sep
-        if path != source_dir and not path.startswith(allowed_prefix):
-            raise CharlotteError(
-                "*suspicious growl* snag can only load files inside the "
-                "project directory — no escaping allowed!", ln
-            )
+        path = self._resolve_sandboxed_path(path, ln)
 
         # Prevent circular imports
         if path in self._imported_files:
@@ -703,15 +736,45 @@ class Interpreter:
 
     def _call_function(self, name: str, arg_str: str, ln: int):
         fn = self.functions[name]
-        args = [self._evaluate(a.strip(), ln) for a in self._parse_args(arg_str)] if arg_str.strip() else []
-        if len(args) != len(fn["params"]):
-            raise CharlotteError(
-                f"*confused bark* {name}() expects {len(fn['params'])} "
-                f"argument(s), got {len(args)}!", ln
-            )
+        raw_args = [a.strip() for a in self._parse_args(arg_str)] if arg_str.strip() else []
+
+        # Check if any argument uses named syntax (param: value)
+        if any(self._is_named_arg(a) for a in raw_args):
+            kwargs = {}
+            positional_idx = 0
+            for a in raw_args:
+                if self._is_named_arg(a):
+                    colon_pos = a.index(":")
+                    pname = a[:colon_pos].strip()
+                    pval_expr = a[colon_pos + 1:].strip()
+                    if pname not in fn["params"]:
+                        raise CharlotteError(
+                            f"*confused bark* {name}() has no parameter \"{pname}\"!", ln
+                        )
+                    kwargs[pname] = self._evaluate(pval_expr, ln)
+                else:
+                    if positional_idx >= len(fn["params"]):
+                        raise CharlotteError(
+                            f"*confused bark* Too many arguments for {name}()!", ln
+                        )
+                    kwargs[fn["params"][positional_idx]] = self._evaluate(a, ln)
+                    positional_idx += 1
+            missing = [p for p in fn["params"] if p not in kwargs]
+            if missing:
+                raise CharlotteError(
+                    f"*confused bark* {name}() is missing: {', '.join(missing)}!", ln
+                )
+        else:
+            args = [self._evaluate(a, ln) for a in raw_args]
+            if len(args) != len(fn["params"]):
+                raise CharlotteError(
+                    f"*confused bark* {name}() expects {len(fn['params'])} "
+                    f"argument(s), got {len(args)}!", ln
+                )
+            kwargs = dict(zip(fn["params"], args))
+
         saved = copy.deepcopy(self.variables)
-        for p, a in zip(fn["params"], args):
-            self.variables[p] = a
+        self.variables.update(kwargs)
         result = None
         try:
             self._execute_block(fn["body"])
@@ -720,6 +783,31 @@ class Interpreter:
         finally:
             self.variables = saved
         return result
+
+    def _is_named_arg(self, token: str) -> bool:
+        """Return True if token looks like 'identifier: value' at the top level."""
+        m = re.match(r'^(\w+)\s*:', token.strip())
+        if not m:
+            return False
+        # Verify the colon is at depth 0 (not inside brackets/parens/braces/strings)
+        colon_pos = token.index(":")
+        depth = 0
+        in_string = False
+        string_char = None
+        for idx, ch in enumerate(token):
+            if not in_string and ch in ('"', "'"):
+                in_string = True
+                string_char = ch
+            elif in_string and ch == string_char:
+                in_string = False
+            if not in_string:
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+            if idx == colon_pos:
+                return depth == 0
+        return False
 
     def _parse_args(self, arg_str: str) -> list[str]:
         """Split arguments respecting parentheses, brackets, braces, and strings."""
@@ -1345,6 +1433,84 @@ class Interpreter:
                 return json.dumps(self._to_json_compatible(val))
             except (TypeError, ValueError) as e:
                 raise CharlotteError(f"*confused yapping* Can't convert to JSON: {e}", ln)
+
+        # sniff_file(path) — read file, returns string or napping on failure
+        if expr.startswith("sniff_file(") and expr.endswith(")"):
+            path_val = str(self._evaluate(expr[11:-1], ln))
+            resolved = self._resolve_sandboxed_path(path_val, ln)
+            try:
+                with open(resolved, "r", encoding="utf-8", errors="replace") as f:
+                    return f.read()
+            except OSError:
+                return None
+
+        # mark_file(path, data) — write (overwrite) file, returns napping
+        if expr.startswith("mark_file(") and expr.endswith(")"):
+            args = self._parse_args(expr[10:-1])
+            if len(args) < 2:
+                raise CharlotteError("mark_file needs a path and data!", ln)
+            path_val = str(self._evaluate(args[0].strip(), ln))
+            data_val = str(self._evaluate(args[1].strip(), ln))
+            resolved = self._resolve_sandboxed_path(path_val, ln)
+            try:
+                with open(resolved, "w", encoding="utf-8") as f:
+                    f.write(data_val)
+            except OSError as e:
+                raise CharlotteError(f"*whimpers* Couldn't mark file: {e}", ln)
+            return None
+
+        # append_file(path, data) — append to file, returns napping
+        if expr.startswith("append_file(") and expr.endswith(")"):
+            args = self._parse_args(expr[12:-1])
+            if len(args) < 2:
+                raise CharlotteError("append_file needs a path and data!", ln)
+            path_val = str(self._evaluate(args[0].strip(), ln))
+            data_val = str(self._evaluate(args[1].strip(), ln))
+            resolved = self._resolve_sandboxed_path(path_val, ln)
+            try:
+                with open(resolved, "a", encoding="utf-8") as f:
+                    f.write(data_val)
+            except OSError as e:
+                raise CharlotteError(f"*whimpers* Couldn't append to file: {e}", ln)
+            return None
+
+        # nose_for_all(text, pattern) — all regex matches as bunny[] (check before nose_for)
+        if expr.startswith("nose_for_all(") and expr.endswith(")"):
+            args = self._parse_args(expr[13:-1])
+            if len(args) < 2:
+                raise CharlotteError("nose_for_all needs text and pattern!", ln)
+            text_val = str(self._evaluate(args[0].strip(), ln))
+            pattern_val = str(self._evaluate(args[1].strip(), ln))
+            try:
+                return re.findall(pattern_val, text_val)
+            except re.error as e:
+                raise CharlotteError(f"*confused sniff* Bad pattern: {e}", ln)
+
+        # nose_for(text, pattern) — first match string or napping
+        if expr.startswith("nose_for(") and expr.endswith(")"):
+            args = self._parse_args(expr[9:-1])
+            if len(args) < 2:
+                raise CharlotteError("nose_for needs text and pattern!", ln)
+            text_val = str(self._evaluate(args[0].strip(), ln))
+            pattern_val = str(self._evaluate(args[1].strip(), ln))
+            try:
+                m = re.search(pattern_val, text_val)
+                return m.group(0) if m else None
+            except re.error as e:
+                raise CharlotteError(f"*confused sniff* Bad pattern: {e}", ln)
+
+        # nose_swap(text, pattern, replacement) — regex substitution
+        if expr.startswith("nose_swap(") and expr.endswith(")"):
+            args = self._parse_args(expr[10:-1])
+            if len(args) < 3:
+                raise CharlotteError("nose_swap needs text, pattern, and replacement!", ln)
+            text_val = str(self._evaluate(args[0].strip(), ln))
+            pattern_val = str(self._evaluate(args[1].strip(), ln))
+            repl_val = str(self._evaluate(args[2].strip(), ln))
+            try:
+                return re.sub(pattern_val, repl_val, text_val)
+            except re.error as e:
+                raise CharlotteError(f"*confused sniff* Bad pattern: {e}", ln)
 
         # User function call
         if "(" in expr and expr.endswith(")"):
