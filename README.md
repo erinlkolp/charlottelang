@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v4.2
+# 🐕 CharlotteLang v4.3
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -59,6 +59,7 @@ charlotte run hello.bark
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
 | `fetch x = 10` | `x = 10` | Create a variable |
+| `fetch a, b = arr` | `a, b = arr` | Destructuring — unpack array into multiple variables |
 | `x = 20` | `x = 20` | Reassign |
 | `bunny[1, 2, 3]` | `[1, 2, 3]` | Array literal |
 | `collar{"a": 1, "b": 2}` | `{"a": 1, "b": 2}` | Dictionary literal |
@@ -118,6 +119,8 @@ charlotte run hello.bark
 |-----------|--------|-------------|
 | `teach trick greet(who):` | `def greet(who):` | Define function |
 | `rollover value` | `return value` | Return from function |
+| `greet(who: "Rex")` | `greet(who="Rex")` | Named argument — pass by parameter name |
+| `greet("Rex", greeting: "Woof")` | `greet("Rex", greeting="Woof")` | Mix positional and named arguments |
 
 ### Error Handling
 | Charlotte | Python | Description |
@@ -221,6 +224,51 @@ oops e:
   bark f"Request failed: {e}"
 ```
 
+### File I/O
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `sniff_file("path")` | `open("path").read()` | Read file contents as string (`napping` if not found) |
+| `mark_file("path", data)` | `open("path","w").write(data)` | Write (overwrite) string to file |
+| `append_file("path", data)` | `open("path","a").write(data)` | Append string to file |
+
+**Security:** All file paths are sandboxed to the project directory — the same restriction as `snag`. Relative paths resolve from the script's location. Attempts to escape via `../` or absolute paths outside the project tree are blocked.
+
+```
+woof Write and read a file
+mark_file("notes.txt", "chihuahua notes\n")
+append_file("notes.txt", "more notes\n")
+fetch content = sniff_file("notes.txt")
+bark content
+
+woof Handle missing files gracefully
+fetch data = sniff_file("maybe.txt")
+sniff data == napping:
+  bark "file not found"
+else pout:
+  bark data
+```
+
+### Regex
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `nose_for(text, pattern)` | `re.search(pattern, text)` | First match string, or `napping` if no match |
+| `nose_for_all(text, pattern)` | `re.findall(pattern, text)` | All matches as a `bunny[]` |
+| `nose_swap(text, pattern, replacement)` | `re.sub(pattern, replacement, text)` | Replace matches with replacement string |
+
+```
+woof Find first number in a string
+fetch m = nose_for("chi123hua", "\\d+")
+bark m   woof → 123
+
+woof Find all digits
+fetch nums = nose_for_all("a1 b2 c3", "\\d")
+bark howBig(nums)   woof → 3
+
+woof Replace with a pattern
+fetch result = nose_swap("woof woof woof", "woof", "yap")
+bark result   woof → yap yap yap
+```
+
 ### String Methods
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
@@ -276,7 +324,7 @@ See the `examples/` directory:
 
 CharlotteLang is designed for trusted personal use. Several protections are built in:
 
-**`snag` sandbox** — import statements can only load `.bark` files within the same directory as the running script (or its subdirectories). Path traversal (`../`) and absolute paths outside the project tree are blocked.
+**`snag` and file I/O sandbox** — `snag` imports and all file I/O (`sniff_file`, `mark_file`, `append_file`) can only access files within the same directory as the running script (or its subdirectories). Path traversal (`../`) and absolute paths outside the project tree are blocked.
 
 **`sniff_env` blocklist** — environment variable names containing sensitive substrings (`SECRET`, `PASSWORD`, `TOKEN`, `API_KEY`, `ACCESS_KEY`, `CREDENTIAL`, `PRIVATE`, etc.) are blocked by default and raise a `CharlotteError`. This prevents `.bark` scripts from accidentally (or maliciously) leaking secrets from the process environment.
 

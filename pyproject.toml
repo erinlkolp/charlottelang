@@ -1,6 +1,6 @@
 [project]
 name = "charlottelang"
-version = "4.2.0"
+version = "4.3.0"
 description = "A Pythonic programming language with chihuahua soul and pitbull energy 🐕"
 readme = "README.md"
 requires-python = ">=3.10"

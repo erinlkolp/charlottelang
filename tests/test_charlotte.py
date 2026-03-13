@@ -2353,3 +2353,220 @@ class TestFloorCeil:
 
     def test_ceil_integer(self):
         assert only('bark ceil(5)\n') == "5"
+
+
+# ─── Destructuring Assignment ────────────────────────────────
+
+class TestDestructuring:
+    """fetch a, b, c = arr — unpack array into multiple variables."""
+
+    def test_basic_two_vars(self):
+        src = 'fetch a, b = bunny[1, 2]\nbark a\nbark b\n'
+        assert run(src) == ["1", "2"]
+
+    def test_basic_three_vars(self):
+        src = 'fetch x, y, z = bunny[10, 20, 30]\nbark f"{x} {y} {z}"\n'
+        assert only(src) == "10 20 30"
+
+    def test_strings_and_numbers(self):
+        src = 'fetch name, age = bunny["Rex", 5]\nbark name\nbark age\n'
+        assert run(src) == ["Rex", "5"]
+
+    def test_from_variable(self):
+        src = 'fetch arr = bunny[7, 8, 9]\nfetch a, b, c = arr\nbark b\n'
+        assert only(src) == "8"
+
+    def test_length_mismatch_too_few(self):
+        src = 'fetch a, b, c = bunny[1, 2]\n'
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "mismatch" in errors[0].lower()
+
+    def test_length_mismatch_too_many(self):
+        src = 'fetch a, b = bunny[1, 2, 3]\n'
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "mismatch" in errors[0].lower()
+
+    def test_non_array_raises_error(self):
+        src = 'fetch a, b = "hello"\n'
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "bunny" in errors[0].lower()
+
+    def test_variables_are_independent_after_unpack(self):
+        src = 'fetch a, b = bunny[1, 2]\na = 99\nbark b\n'
+        assert only(src) == "2"
+
+
+# ─── Named Function Arguments ────────────────────────────────
+
+class TestNamedArgs:
+    """trick(x: 5, y: 3) — pass arguments by parameter name."""
+
+    def test_named_args_basic(self):
+        src = (
+            'teach trick greet(name, greeting):\n'
+            '    bark f"{greeting}, {name}!"\n'
+            'greet(name: "Rex", greeting: "Woof")\n'
+        )
+        assert only(src) == "Woof, Rex!"
+
+    def test_named_args_reordered(self):
+        src = (
+            'teach trick sub(a, b):\n'
+            '    rollover a - b\n'
+            'fetch result = sub(b: 3, a: 10)\n'
+            'bark result\n'
+        )
+        assert only(src) == "7"
+
+    def test_positional_still_works(self):
+        src = (
+            'teach trick add(x, y):\n'
+            '    rollover x + y\n'
+            'bark add(4, 5)\n'
+        )
+        assert only(src) == "9"
+
+    def test_mixed_positional_and_named(self):
+        src = (
+            'teach trick describe(animal, color, size):\n'
+            '    bark f"{size} {color} {animal}"\n'
+            'describe("chihuahua", size: "tiny", color: "tan")\n'
+        )
+        assert only(src) == "tiny tan chihuahua"
+
+    def test_unknown_param_name_raises(self):
+        src = (
+            'teach trick bark_name(name):\n'
+            '    bark name\n'
+            'bark_name(wrong: "Rex")\n'
+        )
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "wrong" in errors[0]
+
+    def test_missing_param_raises(self):
+        src = (
+            'teach trick add(x, y):\n'
+            '    rollover x + y\n'
+            'add(x: 5)\n'
+        )
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "missing" in errors[0].lower() or "y" in errors[0]
+
+
+# ─── File I/O ────────────────────────────────────────────────
+
+class TestFileIO:
+    """sniff_file / mark_file / append_file — sandboxed file I/O."""
+
+    def _interp_at(self, source_path):
+        outputs = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": outputs.append(text)
+        )
+        return interp, outputs
+
+    def test_mark_and_sniff_file(self, tmp_path):
+        f = tmp_path / "data.txt"
+        interp, outputs = self._interp_at(str(tmp_path / "main.bark"))
+        src = f'mark_file("{f}", "hello chi")\nfetch content = sniff_file("{f}")\nbark content\n'
+        interp.run(src, source_path=str(tmp_path / "main.bark"))
+        assert outputs == ["hello chi"]
+
+    def test_sniff_missing_file_returns_napping(self, tmp_path):
+        interp, outputs = self._interp_at(str(tmp_path / "main.bark"))
+        src = f'fetch result = sniff_file("{tmp_path}/nope.txt")\nbark breed(result)\n'
+        interp.run(src, source_path=str(tmp_path / "main.bark"))
+        assert outputs == ["napping"]
+
+    def test_append_file(self, tmp_path):
+        f = tmp_path / "log.txt"
+        interp, outputs = self._interp_at(str(tmp_path / "main.bark"))
+        src = (
+            f'mark_file("{f}", "line1\\n")\n'
+            f'append_file("{f}", "line2\\n")\n'
+            f'fetch content = sniff_file("{f}")\n'
+            f'bark content\n'
+        )
+        interp.run(src, source_path=str(tmp_path / "main.bark"))
+        assert outputs == ["line1\nline2\n"]
+
+    def test_mark_overwrites(self, tmp_path):
+        f = tmp_path / "data.txt"
+        interp, outputs = self._interp_at(str(tmp_path / "main.bark"))
+        src = (
+            f'mark_file("{f}", "first")\n'
+            f'mark_file("{f}", "second")\n'
+            f'fetch content = sniff_file("{f}")\n'
+            f'bark content\n'
+        )
+        interp.run(src, source_path=str(tmp_path / "main.bark"))
+        assert outputs == ["second"]
+
+    def test_traversal_blocked(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        outside = tmp_path / "secret.txt"
+        outside.write_text("secret")
+        errors = []
+        interp = Interpreter(
+            output_fn=lambda text, kind="bark": errors.append(text) if kind == "error" else None
+        )
+        src = f'fetch content = sniff_file("{outside}")\n'
+        interp.run(src, source_path=str(project / "main.bark"))
+        assert len(errors) == 1
+        assert "escaping" in errors[0] or "project directory" in errors[0]
+
+    def test_absolute_path_within_dir_allowed(self, tmp_path):
+        f = tmp_path / "allowed.txt"
+        f.write_text("ok")
+        interp, outputs = self._interp_at(str(tmp_path / "main.bark"))
+        src = f'fetch content = sniff_file("{f}")\nbark content\n'
+        interp.run(src, source_path=str(tmp_path / "main.bark"))
+        assert outputs == ["ok"]
+
+
+# ─── Regex ───────────────────────────────────────────────────
+
+class TestRegex:
+    """nose_for / nose_for_all / nose_swap — regex built-ins."""
+
+    def test_nose_for_match(self):
+        src = 'fetch m = nose_for("chihuahua123", "\\\\d+")\nbark m\n'
+        assert only(src) == "123"
+
+    def test_nose_for_no_match_returns_napping(self):
+        src = 'fetch m = nose_for("chihuahua", "\\\\d+")\nbark breed(m)\n'
+        assert only(src) == "napping"
+
+    def test_nose_for_all_returns_list(self):
+        src = 'fetch matches = nose_for_all("a1 b2 c3", "\\\\d")\nbark howBig(matches)\n'
+        assert only(src) == "3"
+
+    def test_nose_for_all_empty_list_on_no_match(self):
+        src = 'fetch matches = nose_for_all("abc", "\\\\d")\nbark howBig(matches)\n'
+        assert only(src) == "0"
+
+    def test_nose_swap_replaces(self):
+        src = 'fetch result = nose_swap("woof woof woof", "woof", "yap")\nbark result\n'
+        assert only(src) == "yap yap yap"
+
+    def test_nose_swap_with_pattern(self):
+        src = 'fetch result = nose_swap("chi123hua", "\\\\d+", "#")\nbark result\n'
+        assert only(src) == "chi#hua"
+
+    def test_nose_for_invalid_pattern_raises(self):
+        src = 'fetch m = nose_for("hello", "[invalid")\n'
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "pattern" in errors[0].lower()
+
+    def test_nose_swap_invalid_pattern_raises(self):
+        src = 'fetch m = nose_swap("hello", "[bad", "x")\n'
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "pattern" in errors[0].lower()
