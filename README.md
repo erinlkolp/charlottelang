@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v4.3
+# 🐕 CharlotteLang v4.4
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -269,6 +269,51 @@ fetch result = nose_swap("woof woof woof", "woof", "yap")
 bark result   woof → yap yap yap
 ```
 
+### HTTP Server
+| Charlotte | Python | Description |
+|-----------|--------|-------------|
+| `guard GET "/path":` | `@app.route("/path")` | Register a route handler (GET, POST, PUT, DELETE, PATCH) |
+| `guard GET "/dogs/{id}":` | `@app.route("/dogs/<id>")` | Route with path parameters |
+| `kennel 8080` | `app.run(port=8080)` | Start HTTP server (non-blocking) |
+| `leave_kennel` | `server.shutdown()` | Stop the HTTP server |
+
+Inside a `guard` block, the `request` variable is available as a collar with:
+- `"method"` — HTTP method (e.g. `"GET"`)
+- `"path"` — request path (e.g. `"/dogs/42"`)
+- `"headers"` — request headers as a collar
+- `"body"` — request body as a string
+- `"params"` — query string parameters as a collar
+- `"path_params"` — extracted path parameters as a collar (e.g. `collar{"id": "42"}`)
+
+Handlers return a response via `rollover` with a collar containing:
+- `"status"` — HTTP status code (default `200`)
+- `"body"` — response body (string, collar, or bunny — collars/bunnys auto-serialize to JSON)
+- `"headers"` — optional response headers as a collar
+
+```
+woof A simple Dog API
+fetch dogs = bunny["Charlotte", "Buddy", "Luna"]
+
+guard GET "/dogs":
+  rollover collar{"status": 200, "body": collar{"dogs": dogs}}
+
+guard GET "/dogs/{id}":
+  fetch dog_id = goodBoy(request["path_params"]["id"])
+  sniff dog_id >= 0 and dog_id < dogs.toys:
+    rollover collar{"status": 200, "body": collar{"name": dogs[dog_id]}}
+  else pout:
+    rollover collar{"status": 404, "body": collar{"error": "Dog not found!"}}
+
+guard POST "/dogs":
+  fetch data = chew_json(request["body"])
+  dogs.give(data["name"])
+  rollover collar{"status": 201, "body": collar{"created": loyal}}
+
+kennel 8080
+```
+
+The server runs in a background thread. When run via the CLI (`charlotte run server.bark`), the process stays alive until Ctrl+C. Unmatched routes return 404. Errors in handlers return 500.
+
 ### String Methods
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
@@ -319,6 +364,7 @@ See the `examples/` directory:
 - `full_day.bark` — A full day in Charlotte's life
 - `new_features.bark` — Demo of v3.0 features (dicts, try/catch, imports, string methods, etc.)
 - `helpers.bark` — Helper library used by new_features.bark (demonstrates imports)
+- `server.bark` — A simple Dog API server using `guard`/`kennel`
 
 ## Security
 

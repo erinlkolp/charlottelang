@@ -2570,3 +2570,220 @@ class TestRegex:
         errors = run_errors(src)
         assert len(errors) == 1
         assert "pattern" in errors[0].lower()
+
+
+# ─── HTTP Server (kennel) ─────────────────────────────────
+
+import json
+import time
+import urllib.request
+import threading
+
+
+class TestHTTPServer:
+    """Tests for the guard/kennel HTTP server feature."""
+
+    def _make_interp(self):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        return interp, outputs
+
+    def _start_server(self, interp, source, port=0):
+        """Register routes and start kennel. If port=0, find a free port."""
+        if port == 0:
+            import socket
+            with socket.socket() as s:
+                s.bind(("", 0))
+                port = s.getsockname()[1]
+        interp.execute(source + f'\nkennel {port}')
+        time.sleep(0.2)
+        return port
+
+    def test_guard_registers_route(self):
+        interp, _ = self._make_interp()
+        interp.execute('guard GET "/hello":\n  rollover collar{"status": 200, "body": "hi"}')
+        assert len(interp._routes) == 1
+        assert interp._routes[0]["method"] == "GET"
+        assert interp._routes[0]["path"] == "/hello"
+
+    def test_guard_path_params_parsed(self):
+        interp, _ = self._make_interp()
+        interp.execute('guard GET "/dogs/{id}/toys/{toy_id}":\n  rollover collar{"status": 200, "body": "ok"}')
+        route = interp._routes[0]
+        assert route["param_names"] == ["id", "toy_id"]
+
+    def test_guard_invalid_syntax(self):
+        errors = run_errors('guard INVALID:\n  rollover collar{"status": 200, "body": "x"}')
+        assert len(errors) == 1
+        assert "confused head tilt" in errors[0]
+
+    def test_guard_empty_body(self):
+        errors = run_errors('guard GET "/x":')
+        assert len(errors) == 1
+        assert "body" in errors[0].lower()
+
+    def test_kennel_get_request(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/hello":\n  rollover collar{"status": 200, "body": collar{"msg": "hi"}}')
+        try:
+            resp = urllib.request.urlopen(f"http://localhost:{port}/hello")
+            data = json.loads(resp.read())
+            assert data == {"msg": "hi"}
+            assert resp.status == 200
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_post_request(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard POST "/echo":\n  rollover collar{"status": 201, "body": request["body"]}')
+        try:
+            req = urllib.request.Request(
+                f"http://localhost:{port}/echo",
+                data=b'hello', method="POST"
+            )
+            resp = urllib.request.urlopen(req)
+            assert resp.read().decode() == "hello"
+            assert resp.status == 201
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_path_params(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/dogs/{id}":\n  rollover collar{"status": 200, "body": request["path_params"]["id"]}')
+        try:
+            resp = urllib.request.urlopen(f"http://localhost:{port}/dogs/42")
+            assert resp.read().decode() == "42"
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_query_params(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/search":\n  rollover collar{"status": 200, "body": request["params"]["q"]}')
+        try:
+            resp = urllib.request.urlopen(f"http://localhost:{port}/search?q=fido")
+            assert resp.read().decode() == "fido"
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_404_no_route(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/exists":\n  rollover collar{"status": 200, "body": "yes"}')
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/nope")
+            assert False, "Should have raised HTTPError"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_json_body_response(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/data":\n  rollover collar{"status": 200, "body": bunny[1, 2, 3]}')
+        try:
+            resp = urllib.request.urlopen(f"http://localhost:{port}/data")
+            data = json.loads(resp.read())
+            assert data == [1, 2, 3]
+            assert "application/json" in resp.headers.get("Content-Type", "")
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_custom_headers(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/custom":\n  rollover collar{"status": 200, "body": "ok", "headers": collar{"X-Dog": "Charlotte"}}')
+        try:
+            resp = urllib.request.urlopen(f"http://localhost:{port}/custom")
+            assert resp.headers.get("X-Dog") == "Charlotte"
+        finally:
+            interp._server.shutdown()
+
+    def test_leave_kennel(self):
+        interp, outputs = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/":\n  rollover collar{"status": 200, "body": "ok"}')
+        interp.execute("leave_kennel")
+        assert interp._server is None
+        assert any("closed" in o.lower() for o in outputs)
+
+    def test_leave_kennel_no_server(self):
+        errors = run_errors("leave_kennel")
+        assert len(errors) == 1
+        assert "no kennel" in errors[0].lower()
+
+    def test_kennel_already_open(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/":\n  rollover collar{"status": 200, "body": "ok"}')
+        try:
+            errors = []
+            interp.output_fn = lambda text, kind="bark": errors.append(text) if kind == "error" else None
+            interp.execute(f"kennel {port + 1}")
+            # Should have produced an error
+            assert any("already open" in e.lower() for e in errors)
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_multiple_routes(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp, '''guard GET "/a":
+  rollover collar{"status": 200, "body": "route_a"}
+guard GET "/b":
+  rollover collar{"status": 200, "body": "route_b"}''')
+        try:
+            resp_a = urllib.request.urlopen(f"http://localhost:{port}/a")
+            resp_b = urllib.request.urlopen(f"http://localhost:{port}/b")
+            assert resp_a.read().decode() == "route_a"
+            assert resp_b.read().decode() == "route_b"
+        finally:
+            interp._server.shutdown()
+
+    def test_kennel_handler_error_returns_500(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp,
+            'guard GET "/boom":\n  growl "kaboom"')
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/boom")
+            assert False, "Should have raised HTTPError"
+        except urllib.error.HTTPError as e:
+            assert e.code == 500
+            data = json.loads(e.read())
+            assert "error" in data
+        finally:
+            interp._server.shutdown()
+
+    def test_guard_put_delete_patch(self):
+        interp, _ = self._make_interp()
+        port = self._start_server(interp, '''guard PUT "/item":
+  rollover collar{"status": 200, "body": "put"}
+guard DELETE "/item":
+  rollover collar{"status": 200, "body": "delete"}
+guard PATCH "/item":
+  rollover collar{"status": 200, "body": "patch"}''')
+        try:
+            for method, expected in [("PUT", "put"), ("DELETE", "delete"), ("PATCH", "patch")]:
+                req = urllib.request.Request(
+                    f"http://localhost:{port}/item", method=method
+                )
+                resp = urllib.request.urlopen(req)
+                assert resp.read().decode() == expected
+        finally:
+            interp._server.shutdown()
+
+    def test_handler_scope_isolation(self):
+        """Handler should not leak variables into interpreter scope."""
+        interp, _ = self._make_interp()
+        interp.execute('fetch counter = 0')
+        port = self._start_server(interp,
+            'guard GET "/inc":\n  fetch local_var = 99\n  rollover collar{"status": 200, "body": "ok"}')
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/inc")
+            time.sleep(0.1)
+            assert "local_var" not in interp.variables
+        finally:
+            interp._server.shutdown()
