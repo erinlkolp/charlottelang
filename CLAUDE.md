@@ -1,4 +1,4 @@
-# CLAUDE.md — CharlotteLang Interpreter v4.3
+# CLAUDE.md — CharlotteLang Interpreter v4.4
 
 ## Project Overview
 
@@ -91,6 +91,9 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 | `nose_for(text, pat)` | regex first match → string or `napping` |
 | `nose_for_all(text, pat)` | regex all matches → bunny[] |
 | `nose_swap(text, pat, repl)` | regex substitution → string |
+| `guard METHOD "path":` | register HTTP route handler (GET/POST/PUT/DELETE/PATCH) |
+| `kennel PORT` | start HTTP server (non-blocking, daemon thread) |
+| `leave_kennel` | stop HTTP server |
 
 ## Code Conventions
 
@@ -98,7 +101,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 - Dog-themed naming for all language keywords and error messages
 - Error messages use the 🐾 emoji prefix and playful dog personality
 - Example files use the `.bark` extension and live in `examples/`
-- No external dependencies — stdlib only (`copy` for scope isolation, `json` for JSON serialization, `math` for `floor`/`ceil`, `urllib` for HTTP requests)
+- No external dependencies — stdlib only (`copy` for scope isolation, `json` for JSON serialization, `math` for `floor`/`ceil`, `urllib` for HTTP requests, `http.server`/`threading` for kennel server)
 - Python 3.10+ required (uses `match` statement type hints like `list[Line]`)
 
 ## Testing
@@ -115,7 +118,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing, `dig_up`/`bury` HTTP requests, `chew_json`/`yap_json` JSON serialization, `url_allowlist` host restriction, parenthesized expression grouping, `**` operator precedence, `stranger` string truthiness, chained indexing `arr[i][j]`, unary minus `-x`, `floor`/`ceil`, single-quoted f-strings `f'...'`, negative/non-numeric loop count errors, destructuring assignment, named function arguments, sandboxed file I/O, regex built-ins). Example files are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scope isolation, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing, `dig_up`/`bury` HTTP requests, `chew_json`/`yap_json` JSON serialization, `url_allowlist` host restriction, parenthesized expression grouping, `**` operator precedence, `stranger` string truthiness, chained indexing `arr[i][j]`, unary minus `-x`, `floor`/`ceil`, single-quoted f-strings `f'...'`, negative/non-numeric loop count errors, destructuring assignment, named function arguments, sandboxed file I/O, regex built-ins, HTTP server `guard`/`kennel`/`leave_kennel`). Example files are also smoke-tested.
 
 To manually verify examples:
 

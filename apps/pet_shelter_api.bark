@@ -1,0 +1,127 @@
+woof ═══════════════════════════════════════════
+woof  Pet Shelter API
+woof  A RESTful API for managing adoptable dogs
+woof  Run: charlotte run apps/pet_shelter_api.bark
+woof  Try: curl http://localhost:3000/dogs
+woof ═══════════════════════════════════════════
+
+woof ── In-memory data store ──
+
+fetch next_id = 4
+fetch dogs = bunny[]
+dogs.give(collar{"id": 1, "name": "Charlotte", "breed": "Chihuahua", "age": 5, "adopted": stranger})
+dogs.give(collar{"id": 2, "name": "Buddy", "breed": "Golden Retriever", "age": 3, "adopted": stranger})
+dogs.give(collar{"id": 3, "name": "Luna", "breed": "Pitbull Mix", "age": 2, "adopted": stranger})
+
+woof ── Helper: find dog by ID ──
+
+teach trick find_dog(id):
+  zoomies dog through dogs:
+    sniff dog["id"] == id:
+      rollover dog
+  rollover napping
+
+woof ═══════════════════════
+woof  Routes
+woof ═══════════════════════
+
+woof ── GET / — API info ──
+
+guard GET "/":
+  fetch endpoints = bunny["GET /dogs", "GET /dogs/{id}", "POST /dogs", "PUT /dogs/{id}", "DELETE /dogs/{id}", "POST /dogs/{id}/adopt"]
+  fetch info = collar{"name": "Pet Shelter API", "version": "1.0", "endpoints": endpoints}
+  rollover collar{"status": 200, "body": info}
+
+woof ── GET /dogs — list all dogs ──
+
+guard GET "/dogs":
+  rollover collar{"status": 200, "body": collar{"count": dogs.toys, "dogs": dogs}}
+
+woof ── GET /dogs/{id} — get one dog ──
+
+guard GET "/dogs/{id}":
+  fetch id = goodBoy(request["path_params"]["id"])
+  fetch dog = find_dog(id)
+  sniff dog == napping:
+    rollover collar{"status": 404, "body": collar{"error": f"No dog with id {id}"}}
+  rollover collar{"status": 200, "body": dog}
+
+woof ── POST /dogs — add a new dog ──
+
+guard POST "/dogs":
+  careful:
+    fetch data = chew_json(request["body"])
+  oops e:
+    rollover collar{"status": 400, "body": collar{"error": "Invalid JSON in request body"}}
+  sniff "name" not in data:
+    rollover collar{"status": 400, "body": collar{"error": "Missing required field: name"}}
+  sniff "breed" not in data:
+    rollover collar{"status": 400, "body": collar{"error": "Missing required field: breed"}}
+  fetch age = 0
+  sniff "age" in data:
+    fetch age = data["age"]
+  fetch new_dog = collar{"id": next_id, "name": data["name"], "breed": data["breed"], "age": age, "adopted": stranger}
+  dogs.give(new_dog)
+  fetch next_id = next_id + 1
+  rollover collar{"status": 201, "body": new_dog}
+
+woof ── PUT /dogs/{id} — update a dog ──
+
+guard PUT "/dogs/{id}":
+  fetch id = goodBoy(request["path_params"]["id"])
+  fetch dog = find_dog(id)
+  sniff dog == napping:
+    rollover collar{"status": 404, "body": collar{"error": f"No dog with id {id}"}}
+  careful:
+    fetch data = chew_json(request["body"])
+  oops e:
+    rollover collar{"status": 400, "body": collar{"error": "Invalid JSON in request body"}}
+  sniff "name" in data:
+    dog["name"] = data["name"]
+  sniff "breed" in data:
+    dog["breed"] = data["breed"]
+  sniff "age" in data:
+    dog["age"] = data["age"]
+  rollover collar{"status": 200, "body": dog}
+
+woof ── DELETE /dogs/{id} — remove a dog ──
+
+guard DELETE "/dogs/{id}":
+  fetch id = goodBoy(request["path_params"]["id"])
+  fetch found = stranger
+  zoomies i through dogs:
+    sniff dogs[lap]["id"] == id:
+      dogs.remove(dogs[lap])
+      fetch found = loyal
+      shake off
+  sniff found == stranger:
+    rollover collar{"status": 404, "body": collar{"error": f"No dog with id {id}"}}
+  rollover collar{"status": 200, "body": collar{"message": f"Dog {id} removed from shelter"}}
+
+woof ── POST /dogs/{id}/adopt — mark a dog as adopted ──
+
+guard POST "/dogs/{id}/adopt":
+  fetch id = goodBoy(request["path_params"]["id"])
+  fetch dog = find_dog(id)
+  sniff dog == napping:
+    rollover collar{"status": 404, "body": collar{"error": f"No dog with id {id}"}}
+  sniff dog["adopted"]:
+    rollover collar{"status": 409, "body": collar{"error": f'{dog["name"]} is already adopted!'}}
+  dog["adopted"] = loyal
+  rollover collar{"status": 200, "body": collar{"message": f'{dog["name"]} has been adopted! *happy tail wag*'}}
+
+woof ═══════════════════════
+woof  Start the server
+woof ═══════════════════════
+
+kennel 3000
+
+bark ""
+bark "  Try these commands:"
+bark "    curl http://localhost:3000/dogs"
+bark "    curl http://localhost:3000/dogs/1"
+bark '    curl -X POST http://localhost:3000/dogs -d \'{"name": "Rex", "breed": "Husky", "age": 4}\''
+bark '    curl -X PUT http://localhost:3000/dogs/1 -d \'{"age": 6}\''
+bark "    curl -X POST http://localhost:3000/dogs/1/adopt"
+bark "    curl -X DELETE http://localhost:3000/dogs/2"
+bark ""

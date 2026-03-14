@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CharlotteLang Interpreter v4.3
+CharlotteLang Interpreter v4.4
 A Pythonic programming language with chihuahua soul and pitbull energy.
 
 Usage:
@@ -20,6 +20,8 @@ import math
 import urllib.request
 import urllib.error
 import urllib.parse
+import http.server
+import threading
 try:
     import readline  # noqa: F401 — enables up-arrow history in REPL
 except ImportError:
@@ -137,6 +139,12 @@ class Interpreter:
             frozenset(url_allowlist) if url_allowlist is not None else None
         )
         self._http_timeout: int = min(int(http_timeout), self.MAX_HTTP_TIMEOUT)
+        # HTTP server state
+        self._routes: list = []
+        self._server: http.server.HTTPServer | None = None
+        self._server_thread: threading.Thread | None = None
+        self._server_shutdown: threading.Event = threading.Event()
+        self._handler_lock: threading.Lock = threading.Lock()
 
     def _env_var_permitted(self, name: str) -> bool:
         """Return True if sniff_env is allowed to read this env var name."""
@@ -168,7 +176,7 @@ class Interpreter:
     def _http_request(self, url: str, method: str, data=None, headers=None, ln: int = 0):
         """Perform an HTTP request and return a collar (dict) with status, body, headers."""
         self._validate_url(url, ln)
-        req_headers = {"User-Agent": "CharlotteLang/4.3"}
+        req_headers = {"User-Agent": "CharlotteLang/4.4"}
         if headers and isinstance(headers, dict):
             req_headers.update({str(k): str(v) for k, v in headers.items()})
         body_bytes = None
@@ -207,6 +215,13 @@ class Interpreter:
         self.variables = {}
         self.functions = {}
         self._imported_files = set()
+        # Stop any previously running server
+        if self._server:
+            self._server.shutdown()
+            self._server = None
+            self._server_thread = None
+        self._routes = []
+        self._server_shutdown = threading.Event()
         if source_path:
             self._source_dir = os.path.dirname(os.path.abspath(source_path))
         self.execute(source)
@@ -456,6 +471,23 @@ class Interpreter:
             # ── mark_file() / append_file() as standalone statements ──
             if (text.startswith("mark_file(") or text.startswith("append_file(")) and text.endswith(")"):
                 self._evaluate(text, ln)
+                i += 1
+                continue
+
+            # ── guard (route handler) ──
+            if text.startswith("guard ") and text.endswith(":"):
+                i = self._handle_guard(text, lines, i, indent, ln)
+                continue
+
+            # ── kennel (start server) ──
+            if text.startswith("kennel "):
+                self._handle_kennel(text, ln)
+                i += 1
+                continue
+
+            # ── leave_kennel (stop server) ──
+            if text == "leave_kennel":
+                self._handle_leave_kennel(ln)
                 i += 1
                 continue
 
@@ -1569,12 +1601,217 @@ class Interpreter:
             return {str(k): self._to_json_compatible(v) for k, v in val.items()}
         return str(val)
 
+    # ── HTTP Server (kennel) ─────────────────────────────────
+
+    def _handle_guard(self, text, lines, i, indent, ln):
+        """Register a route handler: guard METHOD "/path":"""
+        match = re.match(r'^guard\s+(GET|POST|PUT|DELETE|PATCH)\s+"(.+)":$', text)
+        if not match:
+            raise CharlotteError(
+                '*confused head tilt* — Use: guard GET "/path":', ln
+            )
+        method = match.group(1)
+        path = match.group(2)
+        block, next_idx = self._get_block(lines, i + 1, indent)
+        if not block:
+            raise CharlotteError("Guard block has no body! Indent the body.", ln)
+
+        # Convert path params like {id} to regex named groups
+        param_names = re.findall(r'\{(\w+)\}', path)
+        pattern_str = re.sub(r'\{(\w+)\}', r'(?P<\1>[^/]+)', path)
+        pattern = re.compile(f'^{pattern_str}$')
+
+        self._routes.append({
+            "method": method,
+            "path": path,
+            "pattern": pattern,
+            "param_names": param_names,
+            "body": block,
+        })
+        return next_idx
+
+    def _handle_kennel(self, text, ln):
+        """Start the HTTP server: kennel PORT"""
+        if self._server:
+            raise CharlotteError("*confused bark* The kennel is already open!", ln)
+
+        port_expr = text[7:].strip()
+        port = self._evaluate(port_expr, ln)
+        try:
+            port = int(port)
+        except (ValueError, TypeError):
+            raise CharlotteError("*confused sniff* Kennel port must be a number!", ln)
+        if not (1 <= port <= 65535):
+            raise CharlotteError("*confused sniff* Port must be between 1 and 65535!", ln)
+
+        interpreter = self
+
+        class CharlotteHandler(http.server.BaseHTTPRequestHandler):
+            def do_request(handler_self):
+                parsed = urllib.parse.urlsplit(handler_self.path)
+                path = parsed.path
+                query_params = dict(urllib.parse.parse_qs(
+                    parsed.query, keep_blank_values=True
+                ))
+                # Flatten single-value lists from parse_qs
+                query_params = {
+                    k: v[0] if len(v) == 1 else v
+                    for k, v in query_params.items()
+                }
+
+                # Read request body
+                content_length = int(
+                    handler_self.headers.get("Content-Length", 0)
+                )
+                body = ""
+                if content_length > 0:
+                    body = handler_self.rfile.read(content_length).decode("utf-8")
+
+                # Match against registered routes
+                for route in interpreter._routes:
+                    if route["method"] != handler_self.command:
+                        continue
+                    m = route["pattern"].match(path)
+                    if not m:
+                        continue
+
+                    path_params = {
+                        name: m.group(name) for name in route["param_names"]
+                    }
+                    req_headers = {}
+                    for key in handler_self.headers:
+                        req_headers[key.lower()] = handler_self.headers[key]
+
+                    request_collar = {
+                        "method": handler_self.command,
+                        "path": path,
+                        "headers": req_headers,
+                        "body": body,
+                        "params": query_params,
+                        "path_params": path_params,
+                    }
+
+                    with interpreter._handler_lock:
+                        saved_vars = copy.deepcopy(interpreter.variables)
+                        interpreter.variables["request"] = request_collar
+                        response = None
+                        try:
+                            interpreter._execute_block(route["body"])
+                        except CharlotteReturn as ret:
+                            response = ret.value
+                        except CharlotteError as e:
+                            handler_self.send_response(500)
+                            handler_self.send_header(
+                                "Content-Type", "application/json"
+                            )
+                            handler_self.end_headers()
+                            handler_self.wfile.write(
+                                json.dumps({"error": str(e)}).encode("utf-8")
+                            )
+                            interpreter.variables = saved_vars
+                            return
+                        except Exception as e:
+                            handler_self.send_response(500)
+                            handler_self.send_header(
+                                "Content-Type", "application/json"
+                            )
+                            handler_self.end_headers()
+                            handler_self.wfile.write(
+                                json.dumps({"error": str(e)}).encode("utf-8")
+                            )
+                            interpreter.variables = saved_vars
+                            return
+                        finally:
+                            interpreter.variables = saved_vars
+
+                    if not isinstance(response, dict):
+                        handler_self.send_response(500)
+                        handler_self.send_header(
+                            "Content-Type", "application/json"
+                        )
+                        handler_self.end_headers()
+                        handler_self.wfile.write(json.dumps(
+                            {"error": "Handler must rollover a collar{}"}
+                        ).encode("utf-8"))
+                        return
+
+                    status = int(response.get("status", 200))
+                    resp_body = response.get("body", "")
+                    resp_headers = response.get("headers", {})
+
+                    handler_self.send_response(status)
+                    has_content_type = False
+                    if isinstance(resp_headers, dict):
+                        for k, v in resp_headers.items():
+                            handler_self.send_header(k, str(v))
+                            if k.lower() == "content-type":
+                                has_content_type = True
+                    if not has_content_type:
+                        handler_self.send_header(
+                            "Content-Type", "application/json"
+                        )
+                    handler_self.end_headers()
+
+                    if isinstance(resp_body, (dict, list)):
+                        handler_self.wfile.write(json.dumps(
+                            interpreter._to_json_compatible(resp_body)
+                        ).encode("utf-8"))
+                    else:
+                        handler_self.wfile.write(
+                            str(resp_body).encode("utf-8")
+                        )
+                    return
+
+                # No route matched — 404
+                handler_self.send_response(404)
+                handler_self.send_header("Content-Type", "application/json")
+                handler_self.end_headers()
+                handler_self.wfile.write(
+                    json.dumps({"error": "Not found"}).encode("utf-8")
+                )
+
+            def do_GET(self):
+                self.do_request()
+
+            def do_POST(self):
+                self.do_request()
+
+            def do_PUT(self):
+                self.do_request()
+
+            def do_DELETE(self):
+                self.do_request()
+
+            def do_PATCH(self):
+                self.do_request()
+
+            def log_message(self, format, *args):
+                interpreter.output_fn(
+                    f"🐕 {args[0]} {args[1]} {args[2]}", "bark"
+                )
+
+        self._server = http.server.HTTPServer(("", port), CharlotteHandler)
+        self._server_thread = threading.Thread(
+            target=self._server.serve_forever, daemon=True
+        )
+        self._server_thread.start()
+        self.output_fn(f"🐕 Kennel is open on port {port}! *tail wag*", "bark")
+
+    def _handle_leave_kennel(self, ln):
+        """Stop the HTTP server."""
+        if not self._server:
+            raise CharlotteError("*confused sniff* No kennel to close!", ln)
+        self._server.shutdown()
+        self._server = None
+        self._server_thread = None
+        self.output_fn("🐕 Kennel is closed. *lays down*", "bark")
+
 
 # ─── REPL ──────────────────────────────────────────────────
 
 def run_repl():
     """Interactive CharlotteLang REPL."""
-    print("🐕 CharlotteLang v4.3 REPL")
+    print("🐕 CharlotteLang v4.4 REPL")
     print("   Type Charlotte code below. Commands:")
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
@@ -1742,6 +1979,12 @@ def print_quick_ref():
 │                                                          │
 │  snag "file.bark"        → import another file           │
 │                                                          │
+│  guard GET "/path":      → register route handler        │
+│    rollover collar{...}  → respond (status, body, hdrs)  │
+│  guard POST "/dogs/{id}":→ route with path parameters    │
+│  kennel 8080             → start HTTP server             │
+│  leave_kennel            → stop HTTP server              │
+│                                                          │
 │  REPL commands: .run .clear .show .vars .help .exit      │
 └──────────────────────────────────────────────────────────┘
 """)
@@ -1751,7 +1994,7 @@ def print_quick_ref():
 
 def main():
     if len(sys.argv) < 2:
-        print("🐕 CharlotteLang v4.3")
+        print("🐕 CharlotteLang v4.4")
         print()
         print("Usage:")
         print("  charlotte run <file.bark>   Run a .bark file")
@@ -1778,6 +2021,14 @@ def main():
             source = f.read()
         interp = Interpreter()
         interp.run(source, source_path=filepath)
+
+        # If a kennel (server) is running, block until Ctrl+C
+        if interp._server:
+            try:
+                interp._server_shutdown.wait()
+            except KeyboardInterrupt:
+                print("\n🐕 Closing the kennel... *sad tail*")
+                interp._server.shutdown()
 
     elif command == "repl":
         run_repl()

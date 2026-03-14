@@ -1,0 +1,31 @@
+woof A simple API server in CharlotteLang
+
+woof In-memory data store
+fetch dogs = bunny["Charlotte", "Buddy", "Luna"]
+
+woof GET / — welcome message
+guard GET "/":
+  rollover collar{"status": 200, "body": collar{"message": "Welcome to the Dog API! *tail wag*"}}
+
+woof GET /dogs — list all dogs
+guard GET "/dogs":
+  rollover collar{"status": 200, "body": collar{"dogs": dogs}}
+
+woof GET /dogs/{id} — get a specific dog by index
+guard GET "/dogs/{id}":
+  fetch dog_id = goodBoy(request["path_params"]["id"])
+  sniff dog_id >= 0 and dog_id < dogs.toys:
+    rollover collar{"status": 200, "body": collar{"id": dog_id, "name": dogs[dog_id]}}
+  else pout:
+    rollover collar{"status": 404, "body": collar{"error": "Dog not found!"}}
+
+woof POST /dogs — add a new dog
+guard POST "/dogs":
+  fetch data = chew_json(request["body"])
+  fetch name = data["name"]
+  dogs.give(name)
+  rollover collar{"status": 201, "body": collar{"message": f"Welcome to the pack, {name}!", "id": dogs.toys - 1}}
+
+woof Start the server
+kennel 8080
+bark "Try: curl http://localhost:8080/dogs"
