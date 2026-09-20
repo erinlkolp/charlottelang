@@ -2787,3 +2787,190 @@ guard PATCH "/item":
             assert "local_var" not in interp.variables
         finally:
             interp._server.shutdown()
+
+
+class TestBugFixes:
+    """Regression tests for interpreter bug fixes."""
+
+    def test_http_state_persistence(self):
+        """Handler mutations to existing state must persist across requests."""
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append(text))
+        interp.run(
+            'fetch items = bunny["a", "b"]\n'
+            'guard POST "/add":\n'
+            '  items.give("c")\n'
+            '  rollover collar{"status": 200, "body": items}\n'
+            'guard GET "/list":\n'
+            '  rollover collar{"status": 200, "body": items}\n'
+            'kennel 38390\n'
+        )
+        try:
+            req = urllib.request.Request("http://localhost:38390/add", data=b"{}", method="POST")
+            with urllib.request.urlopen(req) as resp:
+                assert resp.read().decode() == '["a", "b", "c"]'
+            with urllib.request.urlopen("http://localhost:38390/list") as resp:
+                assert resp.read().decode() == '["a", "b", "c"]'
+        finally:
+            interp._server.shutdown()
+
+    def test_multiplicative_precedence(self):
+        """* / // % must evaluate left-to-right with equal precedence."""
+        assert only("bark 10 / 2 * 4") == "20.0"
+        assert only("bark 10 * 4 % 3") == "1"
+        assert only("bark 12 // 3 * 2") == "8"
+
+    def test_logical_or_and_precedence(self):
+        """'and' must have higher precedence than 'or'."""
+        assert only("bark loyal or stranger and stranger") == "True"
+        assert only("bark stranger and stranger or loyal") == "True"
+
+    def test_concat_vs_comparison_precedence(self):
+        """~ must have higher precedence than == and !="""
+        assert only('fetch name = "world"\nbark "hello " ~ name == "hello world"') == "True"
+        out = run('sniff "a" ~ "b" == "xyz":\n  bark "bad"\nelse pout:\n  bark "good"')
+        assert out == ["good"]
+
+    def test_nested_indexing_assignment(self):
+        """Chained list and dict assignment must work."""
+        src = (
+            'fetch grid = bunny[bunny[1, 2], bunny[3, 4]]\n'
+            'grid[0][1] = 99\n'
+            'bark grid[0][1]\n'
+        )
+        assert only(src) == "99"
+
+        dict_src = (
+            'fetch d = collar{"inner": collar{"x": 10}}\n'
+            'd["inner"]["x"] = 42\n'
+            'bark d["inner"]["x"]\n'
+        )
+        assert only(dict_src) == "42"
+
+    def test_non_container_assignment_raises(self):
+        """Assigning to an index of a non-container must raise an error."""
+        errors = run_errors("fetch x = 42\nx[0] = 99")
+        assert len(errors) == 1
+        assert "Can only assign to a bunny" in errors[0]
+
+    def test_assignment_with_equals_in_key(self):
+        """Dict key containing '=' must not break statement parsing."""
+        src = (
+            'fetch d = collar{}\n'
+            'd["a=b"] = 10\n'
+            'bark d["a=b"]\n'
+        )
+        assert only(src) == "10"
+
+    def test_chained_string_methods(self):
+        """Chained string method calls must evaluate sequentially."""
+        src = (
+            'fetch s = "cat dog bird"\n'
+            'bark s.replace("cat", "kitten").replace("dog", "puppy")\n'
+        )
+        assert only(src) == "kitten puppy bird"
+        assert only('fetch s = "  hello  "\nbark s.trim().upper()') == "HELLO"
+
+    def test_nested_loops_preserve_lap_and_toy(self):
+        """Inner loops must not clobber outer loop's lap or toy."""
+        src = (
+            'zoomies through bunny["A", "B"]:\n'
+            '  zoomies through bunny[1, 2]:\n'
+            '    fetch dummy = 0\n'
+            '  bark f"{toy}:{lap}"\n'
+        )
+        assert run(src) == ["A:0", "B:1"]
+
+    def test_shake_off_inside_function_does_not_escape(self):
+        """shake off inside a function must not break the caller's loop."""
+        src = (
+            'teach trick break_caller():\n'
+            '  shake off\n'
+            'zoomies 3 times:\n'
+            '  careful:\n'
+            '    break_caller()\n'
+            '  oops e:\n'
+            '    bark "caught break"\n'
+            '  bark f"lap {lap}"\n'
+        )
+        out = run(src)
+        assert out == ["caught break", "lap 0", "caught break", "lap 1", "caught break", "lap 2"]
+
+    def test_mixed_named_and_positional_args(self):
+        """Mixed named and positional arguments must assign parameters without collision."""
+        src = (
+            'teach trick greet(greeting, name, punctuation):\n'
+            '  bark f"{greeting} {name}{punctuation}"\n'
+            'greet("Hello", name: "Charlotte", "!")\n'
+        )
+        assert only(src) == "Hello Charlotte!"
+
+    def test_duplicate_named_args_raise(self):
+        """Duplicate named arguments must raise an error."""
+        src = (
+            'teach trick test(x):\n'
+            '  bark x\n'
+            'test(x: 1, x: 2)\n'
+        )
+        errors = run_errors(src)
+        assert len(errors) == 1
+        assert "multiple values" in errors[0]
+
+    def test_nested_container_in_place_statements(self):
+        """In-place methods like .give() and .pop() must work on nested containers."""
+        src = (
+            'fetch matrix = bunny[bunny[1, 2]]\n'
+            'matrix[0].give(3)\n'
+            'bark matrix[0].toys\n'
+            'matrix[0].pop()\n'
+            'bark matrix[0].toys\n'
+        )
+        assert run(src) == ["3", "2"]
+
+    def test_literal_collection_indexing(self):
+        """Direct indexing on array and dict literals must work."""
+        assert only("bark bunny[10, 20, 30][1]") == "20"
+        assert only('bark collar{"a": 99}["a"]') == "99"
+
+    def test_slice_colon_inside_subexpression(self):
+        """Slicing must ignore colons inside strings or nested brackets."""
+        src = (
+            'fetch d = collar{"a:b": 2}\n'
+            'fetch arr = bunny[10, 20, 30, 40, 50]\n'
+            'bark arr[d["a:b"]:4]\n'
+        )
+        assert only(src) == "[30, 40]"
+
+    def test_beg_no_args(self, monkeypatch):
+        """beg() without args must default prompt to empty string."""
+        monkeypatch.setattr("builtins.input", lambda prompt="": "user input")
+        assert only("bark beg()") == "user input"
+
+    def test_in_non_collection_raises(self):
+        """'in' and 'not in' on non-collections must raise CharlotteError."""
+        errs1 = run_errors('bark "one" in napping')
+        assert len(errs1) == 1
+        assert "Cannot use 'in'" in errs1[0]
+        errs2 = run_errors('bark 2 in 123')
+        assert len(errs2) == 1
+        assert "Cannot use 'in'" in errs2[0]
+
+    def test_elif_line_number(self):
+        """Error on else sniff line must report that line number, not the sniff line."""
+        src = (
+            'fetch a = 1\n'
+            'sniff a == 2:\n'
+            '  bark "two"\n'
+            'else sniff 1 / 0 == 0:\n'
+            '  bark "zero"\n'
+        )
+        errs = run_errors(src)
+        assert len(errs) == 1
+        assert "Line 4" in errs[0]
+
+    def test_leave_kennel_sets_shutdown(self):
+        """leave_kennel must set the _server_shutdown event."""
+        interp = Interpreter()
+        interp.run("kennel 38391\nleave_kennel\n")
+        assert interp._server_shutdown.is_set()
+

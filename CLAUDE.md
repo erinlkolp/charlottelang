@@ -1,4 +1,4 @@
-# CLAUDE.md — CharlotteLang Interpreter v4.4
+# CLAUDE.md — CharlotteLang Interpreter v4.5
 
 ## Project Overview
 
