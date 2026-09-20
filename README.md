@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v4.4
+# 🐕 CharlotteLang v4.5
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -76,6 +76,7 @@ charlotte run hello.bark
 | `bunny[1, 2, 3]` | `[1, 2, 3]` | Array literal |
 | `arr[0]` | `arr[0]` | Index access |
 | `arr[0][1]` | `arr[0][1]` | Chained / nested index access |
+| `arr[0][1] = val` | `arr[0][1] = val` | Nested index assignment |
 | `arr[-1]` | `arr[-1]` | Negative index (last element) |
 | `arr[1:3]` | `arr[1:3]` | Slice `[start:stop:step]` |
 | `arr.toys` | `len(arr)` | Length |
@@ -94,6 +95,7 @@ charlotte run hello.bark
 | `collar{}` | `{}` | Empty dictionary |
 | `d["key"]` | `d["key"]` | Access value by key |
 | `d["key"] = val` | `d["key"] = val` | Set value by key |
+| `d["a"]["b"] = val` | `d["a"]["b"] = val` | Nested dictionary assignment |
 | `d.bury("key", val)` | `d["key"] = val` | Set value (method) |
 | `d.dig("key")` | `del d["key"]` | Remove key |
 | `d.keys` | `list(d.keys())` | Get keys as list |
@@ -182,7 +184,7 @@ snag "helpers.bark"
 | `round(x)` / `round(x, n)` | `round(x, n)` | Round a number |
 | `min(a, b)` / `min(list)` | `min(a, b)` | Minimum value |
 | `max(a, b)` / `max(list)` | `max(a, b)` | Maximum value |
-| `beg("prompt")` | `input("prompt")` | Read user input from stdin |
+| `beg("prompt")` / `beg()` | `input("prompt")` / `input()` | Read user input from stdin |
 | `floor(x)` | `math.floor(x)` | Round down to nearest integer |
 | `ceil(x)` | `math.ceil(x)` | Round up to nearest integer |
 
@@ -352,7 +354,7 @@ REPL commands:
 
 The REPL supports up-arrow history (via `readline` when available).
 
-Single-line statements auto-execute. Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
+Single-line statements and bare expressions auto-execute (bare expressions evaluate and print their result). Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
 
 Variables and functions defined in one `.run` session persist for the next — the REPL maintains state across executions. Use `.vars` to inspect current state. To fully reset, restart the REPL.
 
@@ -362,7 +364,7 @@ See the `examples/` directory:
 - `hello.bark` — Hello World basics
 - `fizzbuzz.bark` — FizzBuzz, Charlotte-style
 - `full_day.bark` — A full day in Charlotte's life
-- `new_features.bark` — Demo of v3.0 features (dicts, try/catch, imports, string methods, etc.)
+- `new_features.bark` — Demo of language features (dicts, try/catch, imports, string methods, etc.)
 - `helpers.bark` — Helper library used by new_features.bark (demonstrates imports)
 - `server.bark` — A simple Dog API server using `guard`/`kennel`
 

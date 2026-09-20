@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CharlotteLang Interpreter v4.4
+CharlotteLang Interpreter v4.5
 A Pythonic programming language with chihuahua soul and pitbull energy.
 
 Usage:
@@ -176,7 +176,7 @@ class Interpreter:
     def _http_request(self, url: str, method: str, data=None, headers=None, ln: int = 0):
         """Perform an HTTP request and return a collar (dict) with status, body, headers."""
         self._validate_url(url, ln)
-        req_headers = {"User-Agent": "CharlotteLang/4.4"}
+        req_headers = {"User-Agent": "CharlotteLang/4.5"}
         if headers and isinstance(headers, dict):
             req_headers.update({str(k): str(v) for k, v in headers.items()})
         body_bytes = None
@@ -352,19 +352,58 @@ class Interpreter:
                     i = self._handle_fetch(text, i, ln)
                 continue
 
-            # ── reassignment: name = expr ──  (supports dict key assignment: name[key] = expr)
-            if "=" in text and not text.startswith("fetch "):
-                parts = text.split("=", 1)
-                target = parts[0].strip()
-                # Dict/list key assignment: name[key] = value
-                if "[" in target and target.endswith("]"):
-                    bracket_pos = target.index("[")
-                    var_name = target[:bracket_pos]
-                    key_expr = target[bracket_pos + 1:-1]
-                    if var_name in self.variables:
-                        container = self.variables[var_name]
+            # ── reassignment: name = expr or target[key] = expr ──
+            eq_idx = -1
+            if not text.startswith("fetch "):
+                depth = 0
+                in_str = False
+                str_ch = None
+                for idx, ch in enumerate(text):
+                    if not in_str and ch in ('"', "'"):
+                        in_str = True
+                        str_ch = ch
+                    elif in_str and ch == str_ch and self._count_preceding_backslashes(text, idx) % 2 == 0:
+                        in_str = False
+                    if not in_str:
+                        if ch in "([{":
+                            depth += 1
+                        elif ch in ")]}":
+                            depth -= 1
+                        elif ch == "=" and depth == 0:
+                            prev_ch = text[idx - 1] if idx > 0 else ""
+                            next_ch = text[idx + 1] if idx + 1 < len(text) else ""
+                            if prev_ch not in ("!", "<", ">", "=") and next_ch != "=":
+                                eq_idx = idx
+                                break
+
+            if eq_idx != -1:
+                target = text[:eq_idx].strip()
+                val_expr = text[eq_idx + 1:].strip()
+                # Dict/list key assignment: target[key] = value (supports nested: grid[0][1] = 99)
+                if target.endswith("]"):
+                    _depth = 0
+                    _in_str = False
+                    _str_ch = None
+                    last_bracket_pos = -1
+                    for _i, _ch in enumerate(target):
+                        if not _in_str and _ch in ('"', "'"):
+                            _in_str = True
+                            _str_ch = _ch
+                        elif _in_str and _ch == _str_ch and self._count_preceding_backslashes(target, _i) % 2 == 0:
+                            _in_str = False
+                        if not _in_str:
+                            if _ch == '[':
+                                if _depth == 0:
+                                    last_bracket_pos = _i
+                                _depth += 1
+                            elif _ch == ']':
+                                _depth -= 1
+                    if last_bracket_pos > 0:
+                        base_expr = target[:last_bracket_pos].strip()
+                        key_expr = target[last_bracket_pos + 1:-1].strip()
+                        container = self._evaluate(base_expr, ln)
                         key = self._evaluate(key_expr, ln)
-                        val = self._evaluate(parts[1].strip(), ln)
+                        val = self._evaluate(val_expr, ln)
                         if isinstance(container, dict):
                             container[key] = val
                         elif isinstance(container, list):
@@ -379,86 +418,86 @@ class Interpreter:
                                 raise CharlotteError(
                                     f"*paws at empty bunny* Can't assign to index {idx}! "
                                     f"List has {len(container)} items.", ln)
+                        else:
+                            raise CharlotteError(
+                                f"*confused sniff* Can only assign to a bunny (array) or collar (dict), not {type(container).__name__}!", ln)
                         i += 1
                         continue
                 if target.isidentifier() and target in self.variables:
-                    self.variables[target] = self._evaluate(parts[1].strip(), ln)
+                    self.variables[target] = self._evaluate(val_expr, ln)
                     i += 1
                     continue
-                if target.isidentifier() and target not in self.variables and not parts[1].startswith("="):
+                if target.isidentifier() and target not in self.variables:
                     raise CharlotteError(
                         f"*confused sniff* \"{target}\" hasn't been fetched yet! "
                         f"Use: fetch {target} = ...", ln
                     )
 
-            # ── .give() (append) ──
-            if ".give(" in text and text.endswith(")"):
-                dot_pos = text.index(".give(")
-                arr_name = text[:dot_pos]
-                val_expr = text[dot_pos + 6:-1]
-                if arr_name in self.variables and isinstance(self.variables[arr_name], list):
-                    self.variables[arr_name].append(self._evaluate(val_expr, ln))
+            # ── container methods as statements (.give, .bury, .dig, .sort, .reverse, .remove, .pop) ──
+            method_match = self._match_trailing_method(text)
+            if method_match:
+                target_expr, method_name, args_str = method_match
+                if method_name == "give":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, list):
+                        raise CharlotteError(f"*confused sniff* Can only give to a bunny (array), not {type(container).__name__}!", ln)
+                    val = self._evaluate(args_str.strip(), ln)
+                    container.append(val)
                     i += 1
                     continue
-
-            # ── .bury() (dict set) ──
-            if ".bury(" in text and text.endswith(")"):
-                dot_pos = text.index(".bury(")
-                dict_name = text[:dot_pos]
-                args_str = text[dot_pos + 6:-1]
-                if dict_name in self.variables and isinstance(self.variables[dict_name], dict):
+                elif method_name == "bury":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, dict):
+                        raise CharlotteError(f"*confused sniff* Can only bury in a collar (dict), not {type(container).__name__}!", ln)
                     args = self._parse_args(args_str)
                     if len(args) == 2:
                         key = self._evaluate(args[0].strip(), ln)
                         val = self._evaluate(args[1].strip(), ln)
-                        self.variables[dict_name][key] = val
+                        container[key] = val
                         i += 1
                         continue
-
-            # ── .dig() (dict delete) ──
-            if ".dig(" in text and text.endswith(")"):
-                dot_pos = text.index(".dig(")
-                dict_name = text[:dot_pos]
-                key_expr = text[dot_pos + 5:-1]
-                if dict_name in self.variables and isinstance(self.variables[dict_name], dict):
-                    key = self._evaluate(key_expr, ln)
-                    self.variables[dict_name].pop(key, None)
+                elif method_name == "dig":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, dict):
+                        raise CharlotteError(f"*confused sniff* Can only dig in a collar (dict), not {type(container).__name__}!", ln)
+                    key = self._evaluate(args_str.strip(), ln)
+                    container.pop(key, None)
                     i += 1
                     continue
-
-            # ── .sort() (list sort in-place) ──
-            if text.endswith(".sort()"):
-                name = text[:-7]
-                if name in self.variables and isinstance(self.variables[name], list):
-                    self.variables[name].sort()
+                elif method_name == "sort":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, list):
+                        raise CharlotteError(f"*confused sniff* Can only sort a bunny (array), not {type(container).__name__}!", ln)
+                    container.sort()
                     i += 1
                     continue
-
-            # ── .reverse() (list reverse in-place) ──
-            if text.endswith(".reverse()"):
-                name = text[:-10]
-                if name in self.variables and isinstance(self.variables[name], list):
-                    self.variables[name].reverse()
+                elif method_name == "reverse":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, list):
+                        raise CharlotteError(f"*confused sniff* Can only reverse a bunny (array), not {type(container).__name__}!", ln)
+                    container.reverse()
                     i += 1
                     continue
-
-            # ── .remove(val) (remove first occurrence from list) ──
-            if ".remove(" in text and text.endswith(")"):
-                dot_pos = text.index(".remove(")
-                arr_name = text[:dot_pos]
-                if arr_name in self.variables and isinstance(self.variables[arr_name], list):
-                    val = self._evaluate(text[dot_pos + 8:-1], ln)
-                    if val in self.variables[arr_name]:
-                        self.variables[arr_name].remove(val)
+                elif method_name == "remove":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, list):
+                        raise CharlotteError(f"*confused sniff* Can only remove from a bunny (array), not {type(container).__name__}!", ln)
+                    val = self._evaluate(args_str.strip(), ln)
+                    if val in container:
+                        container.remove(val)
                     i += 1
                     continue
-
-            # ── .pop() as statement (result discarded) ──
-            if ".pop(" in text and text.endswith(")"):
-                dot_pos = text.index(".pop(")
-                arr_name = text[:dot_pos]
-                if arr_name in self.variables and isinstance(self.variables[arr_name], list):
-                    self._evaluate(text, ln)
+                elif method_name == "pop":
+                    container = self._evaluate(target_expr, ln)
+                    if not isinstance(container, list):
+                        raise CharlotteError(f"*confused sniff* Can only pop from a bunny (array), not {type(container).__name__}!", ln)
+                    try:
+                        if args_str.strip():
+                            container.pop(int(self._evaluate(args_str.strip(), ln)))
+                        else:
+                            container.pop()
+                    except IndexError:
+                        raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
                     i += 1
                     continue
 
@@ -557,44 +596,67 @@ class Interpreter:
         if times > self.MAX_LOOPS:
             raise CharlotteError(f"Too many zoomies! Max {self.MAX_LOOPS}.", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
-        for z in range(times):
-            self.variables["lap"] = z
-            try:
-                self._execute_block(block)
-            except CharlotteBreak:
-                break
-            except CharlotteContinue:
-                continue
-        return next_idx
-
-    def _handle_foreach(self, text, lines, i, indent, ln):
-        arr_expr = text[16:-1].strip()  # strip "zoomies through " and ":"
-        arr = self._evaluate(arr_expr, ln)
-        # Support iterating through dictionaries
-        if isinstance(arr, dict):
-            block, next_idx = self._get_block(lines, i + 1, indent)
-            for z, key in enumerate(arr):
+        saved_lap = self.variables.get("lap")
+        had_lap = "lap" in self.variables
+        try:
+            for z in range(times):
                 self.variables["lap"] = z
-                self.variables["toy"] = key
                 try:
                     self._execute_block(block)
                 except CharlotteBreak:
                     break
                 except CharlotteContinue:
                     continue
+        finally:
+            if had_lap:
+                self.variables["lap"] = saved_lap
+
+        return next_idx
+
+    def _handle_foreach(self, text, lines, i, indent, ln):
+        arr_expr = text[16:-1].strip()  # strip "zoomies through " and ":"
+        arr = self._evaluate(arr_expr, ln)
+        saved_lap = self.variables.get("lap")
+        had_lap = "lap" in self.variables
+        saved_toy = self.variables.get("toy")
+        had_toy = "toy" in self.variables
+        # Support iterating through dictionaries
+        if isinstance(arr, dict):
+            block, next_idx = self._get_block(lines, i + 1, indent)
+            try:
+                for z, key in enumerate(arr):
+                    self.variables["lap"] = z
+                    self.variables["toy"] = key
+                    try:
+                        self._execute_block(block)
+                    except CharlotteBreak:
+                        break
+                    except CharlotteContinue:
+                        continue
+            finally:
+                if had_lap:
+                    self.variables["lap"] = saved_lap
+                if had_toy:
+                    self.variables["toy"] = saved_toy
             return next_idx
         if not isinstance(arr, list):
             raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
-        for z, item in enumerate(arr):
-            self.variables["lap"] = z
-            self.variables["toy"] = item
-            try:
-                self._execute_block(block)
-            except CharlotteBreak:
-                break
-            except CharlotteContinue:
-                continue
+        try:
+            for z, item in enumerate(arr):
+                self.variables["lap"] = z
+                self.variables["toy"] = item
+                try:
+                    self._execute_block(block)
+                except CharlotteBreak:
+                    break
+                except CharlotteContinue:
+                    continue
+        finally:
+            if had_lap:
+                self.variables["lap"] = saved_lap
+            if had_toy:
+                self.variables["toy"] = saved_toy
         return next_idx
 
     def _handle_foreach_named(self, text, lines, i, indent, ln):
@@ -602,30 +664,46 @@ class Interpreter:
         var_name = match.group(1)
         arr_expr = match.group(2).strip()
         arr = self._evaluate(arr_expr, ln)
+        saved_lap = self.variables.get("lap")
+        had_lap = "lap" in self.variables
+        saved_var = self.variables.get(var_name)
+        had_var = var_name in self.variables
         if isinstance(arr, dict):
             block, next_idx = self._get_block(lines, i + 1, indent)
-            for z, key in enumerate(arr):
+            try:
+                for z, key in enumerate(arr):
+                    self.variables["lap"] = z
+                    self.variables[var_name] = key
+                    try:
+                        self._execute_block(block)
+                    except CharlotteBreak:
+                        break
+                    except CharlotteContinue:
+                        continue
+            finally:
+                if had_lap:
+                    self.variables["lap"] = saved_lap
+                if had_var:
+                    self.variables[var_name] = saved_var
+            return next_idx
+        if not isinstance(arr, list):
+            raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
+        block, next_idx = self._get_block(lines, i + 1, indent)
+        try:
+            for z, item in enumerate(arr):
                 self.variables["lap"] = z
-                self.variables[var_name] = key
+                self.variables[var_name] = item
                 try:
                     self._execute_block(block)
                 except CharlotteBreak:
                     break
                 except CharlotteContinue:
                     continue
-            return next_idx
-        if not isinstance(arr, list):
-            raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
-        block, next_idx = self._get_block(lines, i + 1, indent)
-        for z, item in enumerate(arr):
-            self.variables["lap"] = z
-            self.variables[var_name] = item
-            try:
-                self._execute_block(block)
-            except CharlotteBreak:
-                break
-            except CharlotteContinue:
-                continue
+        finally:
+            if had_lap:
+                self.variables["lap"] = saved_lap
+            if had_var:
+                self.variables[var_name] = saved_var
         return next_idx
 
     def _handle_while(self, text, lines, i, indent, ln):
@@ -661,8 +739,9 @@ class Interpreter:
                 break
             elif t.startswith("else sniff ") and t.endswith(":"):
                 elif_cond = t[11:-1].strip()
+                elif_ln = lines[idx].line_num
                 elif_block, idx = self._get_block(lines, idx + 1, indent)
-                elifs.append((elif_cond, elif_block))
+                elifs.append((elif_cond, elif_block, elif_ln))
                 continue
             else:
                 break
@@ -672,8 +751,8 @@ class Interpreter:
             self._execute_block(true_block)
         else:
             executed = False
-            for elif_cond, elif_block in elifs:
-                if self._is_truthy(self._evaluate(elif_cond, ln)):
+            for elif_cond, elif_block, elif_ln in elifs:
+                if self._is_truthy(self._evaluate(elif_cond, elif_ln)):
                     self._execute_block(elif_block)
                     executed = True
                     break
@@ -783,8 +862,14 @@ class Interpreter:
                         raise CharlotteError(
                             f"*confused bark* {name}() has no parameter \"{pname}\"!", ln
                         )
+                    if pname in kwargs:
+                        raise CharlotteError(
+                            f"*confused bark* {name}() got multiple values for argument \"{pname}\"!", ln
+                        )
                     kwargs[pname] = self._evaluate(pval_expr, ln)
                 else:
+                    while positional_idx < len(fn["params"]) and fn["params"][positional_idx] in kwargs:
+                        positional_idx += 1
                     if positional_idx >= len(fn["params"]):
                         raise CharlotteError(
                             f"*confused bark* Too many arguments for {name}()!", ln
@@ -812,6 +897,10 @@ class Interpreter:
             self._execute_block(fn["body"])
         except CharlotteReturn as ret:
             result = ret.value
+        except CharlotteBreak:
+            raise CharlotteError("*confused head tilt* shake off (break) outside a loop!", ln)
+        except CharlotteContinue:
+            raise CharlotteError("*confused head tilt* keep going (continue) outside a loop!", ln)
         finally:
             self.variables = saved
         return result
@@ -944,6 +1033,48 @@ class Interpreter:
                     result = i
         return result
 
+    def _match_trailing_method(self, text: str) -> tuple[str, str, str] | None:
+        """
+        If text ends with .method_name(args), return (target_expr, method_name, args_str).
+        Otherwise return None.
+        """
+        if not text.endswith(")"):
+            return None
+        # Find matching '(' for the trailing ')'
+        depth = 0
+        in_str = False
+        str_ch = None
+        open_paren = -1
+        for idx in range(len(text) - 1, -1, -1):
+            ch = text[idx]
+            if not in_str and ch in ('"', "'"):
+                if self._count_preceding_backslashes(text, idx) % 2 == 0:
+                    in_str = True
+                    str_ch = ch
+            elif in_str and ch == str_ch:
+                if self._count_preceding_backslashes(text, idx) % 2 == 0:
+                    in_str = False
+            if not in_str:
+                if ch == ')':
+                    depth += 1
+                elif ch == '(':
+                    depth -= 1
+                    if depth == 0:
+                        open_paren = idx
+                        break
+        if open_paren <= 0:
+            return None
+        prefix = text[:open_paren]
+        dot_pos = prefix.rfind(".")
+        if dot_pos <= 0:
+            return None
+        method_name = prefix[dot_pos + 1:].strip()
+        if not method_name.isidentifier():
+            return None
+        target_expr = prefix[:dot_pos].strip()
+        args_str = text[open_paren + 1:-1]
+        return (target_expr, method_name, args_str)
+
     def _evaluate(self, expr: str, ln: int):
         expr = expr.strip()
 
@@ -1004,26 +1135,66 @@ class Interpreter:
 
         # Bunny (array) literal
         if expr.startswith("bunny[") and expr.endswith("]"):
-            inner = expr[6:-1].strip()
-            if not inner:
-                return []
-            return [self._evaluate(a.strip(), ln) for a in self._parse_args(inner)]
+            depth = 0
+            in_str = False
+            str_ch = None
+            closes_at_end = False
+            for _i in range(5, len(expr)):
+                _ch = expr[_i]
+                if not in_str and _ch in ('"', "'"):
+                    in_str = True
+                    str_ch = _ch
+                elif in_str and _ch == str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                    in_str = False
+                elif not in_str:
+                    if _ch == '[':
+                        depth += 1
+                    elif _ch == ']':
+                        depth -= 1
+                        if depth == 0:
+                            closes_at_end = (_i == len(expr) - 1)
+                            break
+            if closes_at_end:
+                inner = expr[6:-1].strip()
+                if not inner:
+                    return []
+                return [self._evaluate(a.strip(), ln) for a in self._parse_args(inner)]
 
         # Collar (dictionary) literal
         if expr.startswith("collar{") and expr.endswith("}"):
-            inner = expr[7:-1].strip()
-            if not inner:
-                return {}
-            result = {}
-            pairs = self._parse_args(inner)
-            for pair in pairs:
-                colon_pos = self._find_operator(pair, ":")
-                if colon_pos == -1:
-                    raise CharlotteError("collar entries need key: value format!", ln)
-                key = self._evaluate(pair[:colon_pos].strip(), ln)
-                val = self._evaluate(pair[colon_pos + 1:].strip(), ln)
-                result[key] = val
-            return result
+            depth = 0
+            in_str = False
+            str_ch = None
+            closes_at_end = False
+            for _i in range(6, len(expr)):
+                _ch = expr[_i]
+                if not in_str and _ch in ('"', "'"):
+                    in_str = True
+                    str_ch = _ch
+                elif in_str and _ch == str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                    in_str = False
+                elif not in_str:
+                    if _ch == '{':
+                        depth += 1
+                    elif _ch == '}':
+                        depth -= 1
+                        if depth == 0:
+                            closes_at_end = (_i == len(expr) - 1)
+                            break
+            if closes_at_end:
+                inner = expr[7:-1].strip()
+                if not inner:
+                    return {}
+                result = {}
+                pairs = self._parse_args(inner)
+                for pair in pairs:
+                    colon_pos = self._find_operator(pair, ":")
+                    if colon_pos == -1:
+                        raise CharlotteError("collar entries need key: value format!", ln)
+                    key = self._evaluate(pair[:colon_pos].strip(), ln)
+                    val = self._evaluate(pair[colon_pos + 1:].strip(), ln)
+                    result[key] = val
+                return result
 
         # Boolean / null literals
         if expr == "loyal":
@@ -1060,7 +1231,7 @@ class Interpreter:
         # Supports chained access like arr[0][1] by finding the last top-level [...].
         # We skip this block if there are top-level binary operators in the expression
         # (e.g. arr[0] + arr[1]) — those are handled by the arithmetic handlers below.
-        if "[" in expr and expr.endswith("]") and not expr.startswith("bunny[") and not expr.startswith("collar{"):
+        if "[" in expr and expr.endswith("]"):
             # Skip if top-level binary operators are present (let arithmetic/comparison
             # handlers split the expression first)
             _has_top_level_op = False
@@ -1092,12 +1263,35 @@ class Interpreter:
                             _depth += 1
                         elif _ch == ']':
                             _depth -= 1
-            if last_bracket_pos > 0:
+            if last_bracket_pos > 0 and not (expr.startswith("bunny[") and last_bracket_pos == 5):
                 base_expr = expr[:last_bracket_pos]
                 key_expr = expr[last_bracket_pos + 1:-1]
                 container = self._evaluate(base_expr, ln)
-                if ":" in key_expr:
-                    parts = key_expr.split(":", 2)
+                # Find colons at depth 0 (not inside strings/brackets) for slicing
+                colon_indices = []
+                _d = 0
+                _is = False
+                _sc = None
+                for _idx, _c in enumerate(key_expr):
+                    if not _is and _c in ('"', "'"):
+                        _is = True
+                        _sc = _c
+                    elif _is and _c == _sc and self._count_preceding_backslashes(key_expr, _idx) % 2 == 0:
+                        _is = False
+                    if not _is:
+                        if _c in "([{":
+                            _d += 1
+                        elif _c in ")]}":
+                            _d -= 1
+                        elif _c == ":" and _d == 0:
+                            colon_indices.append(_idx)
+                if colon_indices:
+                    if len(colon_indices) == 1:
+                        c1 = colon_indices[0]
+                        parts = [key_expr[:c1], key_expr[c1 + 1:]]
+                    else:
+                        c1, c2 = colon_indices[0], colon_indices[1]
+                        parts = [key_expr[:c1], key_expr[c1 + 1:c2], key_expr[c2 + 1:]]
                     start = int(self._evaluate(parts[0].strip(), ln)) if parts[0].strip() else None
                     stop = int(self._evaluate(parts[1].strip(), ln)) if parts[1].strip() else None
                     step = int(self._evaluate(parts[2].strip(), ln)) if len(parts) > 2 and parts[2].strip() else None
@@ -1149,107 +1343,79 @@ class Interpreter:
             if isinstance(val, dict):
                 return list(val.values())
 
-        # String methods
-        # .chew(sep) — split string
-        if ".chew(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".chew(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            sep_expr = expr[dot_pos + 6:-1]
-            if isinstance(val, str):
-                sep = self._evaluate(sep_expr, ln) if sep_expr.strip() else None
-                return val.split(sep)
-
-        # .trim() — strip whitespace
-        if expr.endswith(".trim()"):
-            val = self._evaluate(expr[:-7], ln)
-            if isinstance(val, str):
-                return val.strip()
-
-        # .upper() — uppercase
-        if expr.endswith(".upper()"):
-            val = self._evaluate(expr[:-8], ln)
-            if isinstance(val, str):
-                return val.upper()
-
-        # .lower() — lowercase
-        if expr.endswith(".lower()"):
-            val = self._evaluate(expr[:-8], ln)
-            if isinstance(val, str):
-                return val.lower()
-
-        # .replace(old, new) — replace all occurrences in a string
-        if ".replace(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".replace(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, str):
-                args = self._parse_args(expr[dot_pos + 9:-1])
-                if len(args) == 2:
-                    old = self._evaluate(args[0].strip(), ln)
-                    new = self._evaluate(args[1].strip(), ln)
-                    return val.replace(str(old), str(new))
-
-        # .find(sub) — find index of substring, -1 if not found
-        if ".find(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".find(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, str):
-                sub = self._evaluate(expr[dot_pos + 6:-1], ln)
-                return val.find(str(sub))
-
-        # .startswith(prefix) — check if string starts with prefix
-        if ".startswith(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".startswith(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, str):
-                prefix = self._evaluate(expr[dot_pos + 12:-1], ln)
-                return val.startswith(str(prefix))
-
-        # .endswith(suffix) — check if string ends with suffix
-        if ".endswith(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".endswith(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, str):
-                suffix = self._evaluate(expr[dot_pos + 10:-1], ln)
-                return val.endswith(str(suffix))
-
-        # .join(sep) — join list elements with a separator string
-        if ".join(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".join(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, list):
-                sep = self._evaluate(expr[dot_pos + 6:-1], ln)
-                return str(sep).join(str(item) for item in val)
-
-        # .index(val) — find index of value in list, -1 if not found
-        if ".index(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".index(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, list):
-                search = self._evaluate(expr[dot_pos + 7:-1], ln)
-                try:
-                    return val.index(search)
-                except ValueError:
-                    return -1
-
-        # .pop() / .pop(idx) — remove and return element from list
-        if ".pop(" in expr and expr.endswith(")"):
-            dot_pos = expr.index(".pop(")
-            val = self._evaluate(expr[:dot_pos], ln)
-            if isinstance(val, list):
-                idx_expr = expr[dot_pos + 5:-1].strip()
-                try:
-                    if idx_expr:
-                        return val.pop(int(self._evaluate(idx_expr, ln)))
-                    return val.pop()
-                except IndexError:
-                    raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
+        # Methods on strings and lists (supports chained calls)
+        method_call = self._match_trailing_method(expr)
+        if method_call:
+            target_expr, mname, margs_str = method_call
+            if mname == "chew":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    sep = self._evaluate(margs_str.strip(), ln) if margs_str.strip() else None
+                    return val.split(sep)
+            elif mname == "trim":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    return val.strip()
+            elif mname == "upper":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    return val.upper()
+            elif mname == "lower":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    return val.lower()
+            elif mname == "replace":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    args = self._parse_args(margs_str)
+                    if len(args) == 2:
+                        old = self._evaluate(args[0].strip(), ln)
+                        new = self._evaluate(args[1].strip(), ln)
+                        return val.replace(str(old), str(new))
+            elif mname == "find":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    sub = self._evaluate(margs_str.strip(), ln)
+                    return val.find(str(sub))
+            elif mname == "startswith":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    prefix = self._evaluate(margs_str.strip(), ln)
+                    return val.startswith(str(prefix))
+            elif mname == "endswith":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, str):
+                    suffix = self._evaluate(margs_str.strip(), ln)
+                    return val.endswith(str(suffix))
+            elif mname == "join":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, list):
+                    sep = self._evaluate(margs_str.strip(), ln)
+                    return str(sep).join(str(item) for item in val)
+            elif mname == "index":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, list):
+                    search = self._evaluate(margs_str.strip(), ln)
+                    try:
+                        return val.index(search)
+                    except ValueError:
+                        return -1
+            elif mname == "pop":
+                val = self._evaluate(target_expr, ln)
+                if isinstance(val, list):
+                    try:
+                        if margs_str.strip():
+                            return val.pop(int(self._evaluate(margs_str.strip(), ln)))
+                        return val.pop()
+                    except IndexError:
+                        raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
 
         # Logical NOT
         if expr.startswith("not "):
             return not self._is_truthy(self._evaluate(expr[4:], ln))
 
-        # Logical AND / OR (scan left to right, respecting parens)
-        for op, handler in [(" and ", "and"), (" or ", "or")]:
+        # Logical OR / AND (or has lower precedence than and; scan left to right, respecting parens)
+        for op, handler in [(" or ", "or"), (" and ", "and")]:
             idx = self._find_operator(expr, op)
             if idx != -1:
                 left = self._evaluate(expr[:idx], ln)
@@ -1258,16 +1424,15 @@ class Interpreter:
                 else:
                     return left if self._is_truthy(left) else self._evaluate(expr[idx + len(op):], ln)
 
-        # String concatenation ~
-        idx = self._find_operator(expr, " ~ ")
-        if idx != -1:
-            parts = []
-            while idx != -1:
-                parts.append(expr[:idx])
-                expr = expr[idx + 3:]
-                idx = self._find_operator(expr, " ~ ")
-            parts.append(expr)
-            return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
+        def _in_op(a, b):
+            if not isinstance(b, (list, dict, str)):
+                raise CharlotteError(f"*confused sniff* Cannot use 'in' on {type(b).__name__}!", ln)
+            return a in b if isinstance(b, (list, dict)) else str(a) in b
+
+        def _not_in_op(a, b):
+            if not isinstance(b, (list, dict, str)):
+                raise CharlotteError(f"*confused sniff* Cannot use 'not in' on {type(b).__name__}!", ln)
+            return a not in b if isinstance(b, (list, dict)) else str(a) not in b
 
         # Comparisons — longer forms checked before shorter to avoid partial matches
         comparisons = [
@@ -1281,8 +1446,8 @@ class Interpreter:
             (" equals ", lambda a, b: a == b),
             (" != ", lambda a, b: a != b),
             (" == ", lambda a, b: a == b),
-            (" not in ", lambda a, b: a not in b if isinstance(b, (list, dict)) else str(a) not in str(b)),
-            (" in ", lambda a, b: a in b if isinstance(b, (list, dict)) else str(a) in str(b)),
+            (" not in ", _not_in_op),
+            (" in ", _in_op),
         ]
         for op_str, op_fn in comparisons:
             idx = self._find_operator(expr, op_str)
@@ -1291,37 +1456,58 @@ class Interpreter:
                 right = self._evaluate(expr[idx + len(op_str):], ln)
                 return op_fn(left, right)
 
-        # Arithmetic: + - (scan right to left, respecting parens)
+        # String concatenation ~ (lower precedence than arithmetic, higher than comparisons)
+        idx = self._find_operator(expr, " ~ ")
+        if idx != -1:
+            parts = []
+            while idx != -1:
+                parts.append(expr[:idx])
+                expr = expr[idx + 3:]
+                idx = self._find_operator(expr, " ~ ")
+            parts.append(expr)
+            return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
+
+        # Arithmetic: + - (equal precedence, left-associative: scan for rightmost)
+        best_add_op = None
+        best_add_idx = -1
         for op in (" + ", " - "):
             idx = self._rfind_operator(expr, op)
-            if idx > 0:
-                left = self._evaluate(expr[:idx], ln)
-                right = self._evaluate(expr[idx + len(op):], ln)
-                if op == " + ":
-                    if isinstance(left, str) or isinstance(right, str):
-                        return str(left) + str(right)
-                    return left + right
-                return left - right
+            if idx > best_add_idx:
+                best_add_idx = idx
+                best_add_op = op
+        if best_add_idx > 0:
+            left = self._evaluate(expr[:best_add_idx], ln)
+            right = self._evaluate(expr[best_add_idx + len(best_add_op):], ln)
+            if best_add_op == " + ":
+                if isinstance(left, str) or isinstance(right, str):
+                    return str(left) + str(right)
+                return left + right
+            return left - right
 
-        # Arithmetic: * / // %
+        # Arithmetic: * / // % (equal precedence, left-associative: scan for rightmost)
+        best_mul_op = None
+        best_mul_idx = -1
         for op in (" // ", " / ", " * ", " % "):
             idx = self._rfind_operator(expr, op)
-            if idx > 0:
-                left = self._evaluate(expr[:idx], ln)
-                right = self._evaluate(expr[idx + len(op):], ln)
-                if op in (" / ", " // ") and right == 0:
-                    raise CharlotteError("Can't divide by zero — stranger danger!", ln)
-                if op == " // ":
-                    return left // right
-                if op == " * ":
-                    if isinstance(left, str) and isinstance(right, int):
-                        return left * right
-                    if isinstance(left, int) and isinstance(right, str):
-                        return right * left
+            if idx > best_mul_idx:
+                best_mul_idx = idx
+                best_mul_op = op
+        if best_mul_idx > 0:
+            left = self._evaluate(expr[:best_mul_idx], ln)
+            right = self._evaluate(expr[best_mul_idx + len(best_mul_op):], ln)
+            if best_mul_op in (" / ", " // ") and right == 0:
+                raise CharlotteError("Can't divide by zero — stranger danger!", ln)
+            if best_mul_op == " // ":
+                return left // right
+            if best_mul_op == " * ":
+                if isinstance(left, str) and isinstance(right, int):
                     return left * right
-                if op == " % ":
-                    return left % right
-                return left / right
+                if isinstance(left, int) and isinstance(right, str):
+                    return right * left
+                return left * right
+            if best_mul_op == " % ":
+                return left % right
+            return left / right
 
         # Arithmetic: ** (power) — highest arithmetic precedence, right-to-left
         idx = self._find_operator(expr, " ** ")
@@ -1428,7 +1614,8 @@ class Interpreter:
 
         # beg(prompt) — read user input from stdin, returns string
         if expr.startswith("beg(") and expr.endswith(")"):
-            prompt_val = self._evaluate(expr[4:-1], ln)
+            inner = expr[4:-1].strip()
+            prompt_val = self._evaluate(inner, ln) if inner else ""
             return input(str(prompt_val))
 
         # dig_up(url) / dig_up(url, headers) — HTTP GET request
@@ -1692,7 +1879,7 @@ class Interpreter:
                     }
 
                     with interpreter._handler_lock:
-                        saved_vars = copy.deepcopy(interpreter.variables)
+                        existing_keys = set(interpreter.variables.keys())
                         interpreter.variables["request"] = request_collar
                         response = None
                         try:
@@ -1708,7 +1895,6 @@ class Interpreter:
                             handler_self.wfile.write(
                                 json.dumps({"error": str(e)}).encode("utf-8")
                             )
-                            interpreter.variables = saved_vars
                             return
                         except Exception as e:
                             handler_self.send_response(500)
@@ -1719,10 +1905,12 @@ class Interpreter:
                             handler_self.wfile.write(
                                 json.dumps({"error": str(e)}).encode("utf-8")
                             )
-                            interpreter.variables = saved_vars
                             return
                         finally:
-                            interpreter.variables = saved_vars
+                            interpreter.variables.pop("request", None)
+                            for k in list(interpreter.variables.keys()):
+                                if k not in existing_keys:
+                                    interpreter.variables.pop(k, None)
 
                     if not isinstance(response, dict):
                         handler_self.send_response(500)
@@ -1804,6 +1992,7 @@ class Interpreter:
         self._server.shutdown()
         self._server = None
         self._server_thread = None
+        self._server_shutdown.set()
         self.output_fn("🐕 Kennel is closed. *lays down*", "bark")
 
 
@@ -1811,7 +2000,7 @@ class Interpreter:
 
 def run_repl():
     """Interactive CharlotteLang REPL."""
-    print("🐕 CharlotteLang v4.4 REPL")
+    print("🐕 CharlotteLang v4.5 REPL")
     print("   Type Charlotte code below. Commands:")
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
@@ -1876,7 +2065,25 @@ def run_repl():
                 not stripped.endswith(":") and
                 not buffer[-1].startswith(" ") and
                 len(buffer) == 1):
-                interp.execute(stripped)
+                try:
+                    interp._execute_block(parse_lines(stripped))
+                except CharlotteError as ce:
+                    if "Charlotte doesn't understand" in str(ce):
+                        try:
+                            val = interp._evaluate(stripped, 1)
+                            if val is not None:
+                                interp.output_fn(str(val), "bark")
+                        except Exception:
+                            interp.output_fn(str(ce), "error")
+                    else:
+                        interp.output_fn(str(ce), "error")
+                except CharlotteReturn as ret:
+                    if ret.value is not None:
+                        interp.output_fn(str(ret.value), "bark")
+                except (CharlotteBreak, CharlotteContinue):
+                    pass
+                except Exception as e:
+                    interp.output_fn(f"🐾 Unexpected error: {e}", "error")
                 buffer = []
 
 
@@ -1994,7 +2201,7 @@ def print_quick_ref():
 
 def main():
     if len(sys.argv) < 2:
-        print("🐕 CharlotteLang v4.4")
+        print("🐕 CharlotteLang v4.5")
         print()
         print("Usage:")
         print("  charlotte run <file.bark>   Run a .bark file")
