@@ -2045,18 +2045,18 @@ def _mock_response(body="", status=200, headers=None):
 class TestHTTPDigUp:
     """Tests for dig_up() (HTTP GET) built-in."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_basic_get(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
         result = run('fetch resp = dig_up("https://example.com/api")\nbark resp["status"]')
         assert result == ["200"]
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_body(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("hello world", 200)
         assert only('fetch resp = dig_up("https://example.com")\nbark resp["body"]') == "hello world"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_with_headers(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
         src = 'fetch h = collar{"Authorization": "Bearer abc"}\nfetch resp = dig_up("https://example.com/api", h)\nbark resp["status"]'
@@ -2065,7 +2065,7 @@ class TestHTTPDigUp:
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("Authorization") == "Bearer abc"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_parse_json_response(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"name": "Charlotte", "age": 5}', 200)
         src = 'fetch resp = dig_up("https://example.com/api")\nfetch data = chew_json(resp["body"])\nbark data["name"]'
@@ -2085,7 +2085,7 @@ class TestHTTPDigUp:
         errors = run_errors('bark dig_up("ftp://example.com/file")')
         assert len(errors) == 1
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_error_response(self, mock_urlopen):
         err = urllib.error.HTTPError(
             "https://example.com/missing", 404, "Not Found", {}, io.BytesIO(b"not found")
@@ -2094,7 +2094,7 @@ class TestHTTPDigUp:
         result = only('fetch resp = dig_up("https://example.com/missing")\nbark resp["status"]')
         assert result == "404"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_connection_error(self, mock_urlopen):
         mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         errors = run_errors('fetch resp = dig_up("https://example.com")')
@@ -2105,13 +2105,13 @@ class TestHTTPDigUp:
 class TestHTTPBury:
     """Tests for bury() (HTTP POST) built-in."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_basic_post(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"id": 1}', 201)
         src = 'fetch body = yap_json(collar{"name": "Charlotte"})\nfetch resp = bury("https://example.com/api", body)\nbark resp["status"]'
         assert only(src) == "201"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_post_sends_data(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
         src = 'fetch body = yap_json(collar{"key": "val"})\nfetch resp = bury("https://example.com/api", body)'
@@ -2120,7 +2120,7 @@ class TestHTTPBury:
         assert req.method == "POST"
         assert b'"key"' in req.data
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_post_with_custom_headers(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("ok", 200)
         src = ('fetch h = collar{"X-Custom": "test123"}\n'
@@ -2130,7 +2130,7 @@ class TestHTTPBury:
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("X-custom") == "test123"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_post_default_content_type(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("ok", 200)
         run('fetch resp = bury("https://example.com/api", "test")')
@@ -2146,7 +2146,7 @@ class TestHTTPBury:
 class TestHTTPUrlAllowlist:
     """Tests for url_allowlist security restriction."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_allowed_host(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("ok", 200)
         outputs = []
@@ -2177,7 +2177,7 @@ class TestHTTPUrlAllowlist:
 class TestHTTPWithCareful:
     """Tests for HTTP functions used with careful/oops error handling."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_catch_connection_error(self, mock_urlopen):
         mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         src = ('careful:\n'
@@ -3164,3 +3164,192 @@ class TestPetShelterApp:
             assert exc.value.code == 409
         finally:
             interp._server.shutdown()
+
+
+# ─── CLI Error Reporting ────────────────────────────────────
+
+class TestCliErrors:
+    """`charlotte run` reports uncaught errors on stderr and exits with status 1."""
+
+    def _run_cli(self, source):
+        import subprocess
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "prog.bark")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(source)
+            return subprocess.run(
+                [sys.executable, os.path.join(root, "charlotte.py"), "run", path],
+                capture_output=True, encoding="utf-8", timeout=60,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            )
+
+    def test_error_goes_to_stderr_with_exit_1(self):
+        result = self._run_cli('bark "before"\nbark 1 / 0\nbark "after"\n')
+        assert result.returncode == 1
+        assert result.stdout.strip() == "before"
+        assert "divide by zero" in result.stderr
+
+    def test_clean_program_exits_0(self):
+        result = self._run_cli('bark "hi"\n')
+        assert result.returncode == 0
+        assert result.stdout.strip() == "hi"
+        assert result.stderr == ""
+
+    def test_caught_error_exits_0(self):
+        result = self._run_cli('careful:\n  growl "oops"\noops e:\n  bark "caught"\n')
+        assert result.returncode == 0
+        assert result.stdout.strip() == "caught"
+
+    def test_run_and_execute_report_success(self):
+        interp = Interpreter(output_fn=lambda text, kind="bark": None)
+        assert interp.run('bark "ok"') is True
+        assert interp.run('bark 1 / 0') is False
+        assert interp.execute('bark "ok"') is True
+
+
+# ─── HTTP Server Robustness ─────────────────────────────────
+
+class TestHTTPServerFixes:
+    """Unsupported methods, the `request` variable, and literal route paths."""
+
+    def _start(self, source):
+        import socket
+        with socket.socket() as s:
+            s.bind(("", 0))
+            port = s.getsockname()[1]
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append((kind, text)))
+        interp.run(source + f"\nkennel {port}")
+        time.sleep(0.2)
+        return interp, port, outputs
+
+    def test_unsupported_method_gets_501_response(self):
+        import http.client
+        interp, port, outputs = self._start(
+            'guard GET "/ping":\n  rollover collar{"status": 200, "body": "pong"}'
+        )
+        try:
+            for method in ("OPTIONS", "HEAD"):
+                conn = http.client.HTTPConnection("localhost", port, timeout=5)
+                conn.request(method, "/ping")
+                assert conn.getresponse().status == 501
+                conn.close()
+            # The server keeps serving afterwards
+            with urllib.request.urlopen(f"http://localhost:{port}/ping") as resp:
+                assert resp.read() == b"pong"
+            assert any(kind == "howl" and "501" in text for kind, text in outputs)
+        finally:
+            interp._server.shutdown()
+
+    def test_global_named_request_survives_handler(self):
+        interp, port, _ = self._start(
+            'fetch request = "my global"\n'
+            'guard GET "/echo":\n'
+            '  rollover collar{"status": 200, "body": request["path"]}'
+        )
+        try:
+            with urllib.request.urlopen(f"http://localhost:{port}/echo") as resp:
+                assert resp.read() == b"/echo"
+            assert interp.variables["request"] == "my global"
+        finally:
+            interp._server.shutdown()
+
+    def test_request_variable_removed_after_handler(self):
+        interp, port, _ = self._start(
+            'guard GET "/x":\n  rollover collar{"status": 200, "body": "ok"}'
+        )
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/x").read()
+            assert "request" not in interp.variables
+        finally:
+            interp._server.shutdown()
+
+    def test_route_path_is_matched_literally(self):
+        interp, port, _ = self._start(
+            'guard GET "/robots.txt":\n'
+            '  rollover collar{"status": 200, "body": "robots"}\n'
+            'guard GET "/v1.0/(beta)/{id}":\n'
+            '  rollover collar{"status": 200, "body": request["path_params"]["id"]}'
+        )
+        try:
+            with urllib.request.urlopen(f"http://localhost:{port}/robots.txt") as resp:
+                assert resp.read() == b"robots"
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(f"http://localhost:{port}/robotsXtxt")
+            assert exc.value.code == 404
+            with urllib.request.urlopen(f"http://localhost:{port}/v1.0/(beta)/7") as resp:
+                assert resp.read() == b"7"
+        finally:
+            interp._server.shutdown()
+
+
+# ─── HTTP Client Redirect Checks ────────────────────────────
+
+class TestHTTPRedirectChecks:
+    """Every redirect hop must pass the same scheme and url_allowlist checks."""
+
+    def _redirect_server(self):
+        import http.server
+
+        class Redirector(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                port = self.server.server_port
+                targets = {
+                    "/to-ip": f"http://127.0.0.1:{port}/final",
+                    "/to-localhost": f"http://localhost:{port}/final",
+                    "/to-ftp": "ftp://localhost/file",
+                }
+                if self.path in targets:
+                    self.send_response(302)
+                    self.send_header("Location", targets[self.path])
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"reached " + self.path.encode())
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Redirector)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def _run(self, source, **kwargs):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append((kind, text)), **kwargs)
+        interp.run(source)
+        return outputs
+
+    def test_redirect_to_host_not_on_allowlist_is_blocked(self):
+        server = self._redirect_server()
+        try:
+            out = self._run(
+                f'bark dig_up("http://localhost:{server.server_port}/to-ip")["body"]',
+                url_allowlist={"localhost"},
+            )
+            assert len(out) == 1 and out[0][0] == "error"
+            assert "127.0.0.1" in out[0][1] and "not on the allowed list" in out[0][1]
+        finally:
+            server.shutdown()
+
+    def test_redirect_to_allowed_host_is_followed(self):
+        server = self._redirect_server()
+        try:
+            out = self._run(
+                f'bark dig_up("http://127.0.0.1:{server.server_port}/to-localhost")["body"]',
+                url_allowlist={"localhost", "127.0.0.1"},
+            )
+            assert out == [("bark", "reached /final")]
+        finally:
+            server.shutdown()
+
+    def test_redirect_to_non_http_scheme_is_blocked(self):
+        server = self._redirect_server()
+        try:
+            out = self._run(f'bark dig_up("http://127.0.0.1:{server.server_port}/to-ftp")["body"]')
+            assert len(out) == 1 and out[0][0] == "error"
+            assert "Only http:// and https://" in out[0][1]
+        finally:
+            server.shutdown()

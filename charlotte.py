@@ -123,7 +123,7 @@ class Interpreter:
         self.variables: dict = {}
         self.functions: dict = {}
         def _default_output(text, kind="bark"):
-            if kind == "howl":
+            if kind in ("howl", "error"):
                 print(text, file=sys.stderr)
             else:
                 print(text)
@@ -187,8 +187,17 @@ class Interpreter:
             if "Content-Type" not in req_headers:
                 req_headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)
+        interpreter = self
+
+        class CheckedRedirectHandler(urllib.request.HTTPRedirectHandler):
+            """Apply the scheme and url_allowlist checks to every redirect hop."""
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                interpreter._validate_url(newurl, ln)
+                return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+        opener = urllib.request.build_opener(CheckedRedirectHandler)
         try:
-            with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
+            with opener.open(req, timeout=self._http_timeout) as resp:
                 raw = resp.read(self.MAX_HTTP_RESPONSE)
                 charset = resp.headers.get_content_charset() or "utf-8"
                 return {
@@ -206,11 +215,16 @@ class Interpreter:
             }
         except urllib.error.URLError as e:
             raise CharlotteError(f"*whimpers* Could not reach \"{url}\": {e.reason}", ln)
+        except CharlotteError:
+            raise  # e.g. a redirect to a blocked URL
         except Exception as e:
             raise CharlotteError(f"*whimpers* HTTP request failed: {e}", ln)
 
-    def run(self, source: str, source_path: str = None):
-        """Run a CharlotteLang program from source string, resetting all state first."""
+    def run(self, source: str, source_path: str = None) -> bool:
+        """Run a CharlotteLang program from source string, resetting all state first.
+
+        Returns False if the program stopped with an error, True otherwise.
+        """
         self.variables = {}
         self.functions = {}
         self._imported_files = set()
@@ -223,10 +237,13 @@ class Interpreter:
         self._server_shutdown = threading.Event()
         if source_path:
             self._source_dir = os.path.dirname(os.path.abspath(source_path))
-        self.execute(source)
+        return self.execute(source)
 
-    def execute(self, source: str):
-        """Execute CharlotteLang source without resetting state (used by REPL)."""
+    def execute(self, source: str) -> bool:
+        """Execute CharlotteLang source without resetting state (used by REPL).
+
+        Returns False if the program stopped with an error, True otherwise.
+        """
         lines = parse_lines(source)
         try:
             self._execute_block(lines)
@@ -238,8 +255,11 @@ class Interpreter:
             pass  # Top-level keep going is fine
         except CharlotteError as e:
             self.output_fn(str(e), "error")
+            return False
         except Exception as e:
             self.output_fn(f"🐾 Unexpected error: {e}", "error")
+            return False
+        return True
 
     # ── Block execution ──
 
@@ -1846,9 +1866,13 @@ class Interpreter:
         if not block:
             raise CharlotteError("Guard block has no body! Indent the body.", ln)
 
-        # Convert path params like {id} to regex named groups
+        # Convert path params like {id} to regex named groups; everything else
+        # matches literally (so "/robots.txt" doesn't also match "/robotsXtxt")
         param_names = re.findall(r'\{(\w+)\}', path)
-        pattern_str = re.sub(r'\{(\w+)\}', r'(?P<\1>[^/]+)', path)
+        pattern_str = "".join(
+            f"(?P<{part[1:-1]}>[^/]+)" if re.fullmatch(r'\{\w+\}', part) else re.escape(part)
+            for part in re.split(r'(\{\w+\})', path)
+        )
         pattern = re.compile(f'^{pattern_str}$')
 
         self._routes.append({
@@ -1923,6 +1947,8 @@ class Interpreter:
 
                     with interpreter._handler_lock:
                         existing_keys = set(interpreter.variables.keys())
+                        # `request` shadows a global of the same name only while the handler runs
+                        saved_request = interpreter.variables.get("request")
                         interpreter.variables["request"] = request_collar
                         response = None
                         try:
@@ -1950,7 +1976,8 @@ class Interpreter:
                             )
                             return
                         finally:
-                            interpreter.variables.pop("request", None)
+                            if "request" in existing_keys:
+                                interpreter.variables["request"] = saved_request
                             for k in list(interpreter.variables.keys()):
                                 if k not in existing_keys:
                                     interpreter.variables.pop(k, None)
@@ -2016,10 +2043,16 @@ class Interpreter:
             def do_PATCH(self):
                 self.do_request()
 
-            def log_message(self, format, *args):
+            def log_request(self, code="-", size="-"):
+                code = getattr(code, "value", code)  # HTTPStatus → int
                 interpreter.output_fn(
-                    f"🐕 {args[0]} {args[1]} {args[2]}", "bark"
+                    f"🐕 {self.requestline} {code} {size}", "bark"
                 )
+
+            def log_message(self, format, *args):
+                # Only errors reach here (e.g. 501 for OPTIONS/HEAD, 400 for a
+                # malformed request), and their args vary in shape and count.
+                interpreter.output_fn(f"🐕 {format % args}", "howl")
 
         self._server = http.server.HTTPServer(("", port), CharlotteHandler)
         self._server_thread = threading.Thread(
@@ -2270,7 +2303,8 @@ def main():
         with open(filepath, "r") as f:
             source = f.read()
         interp = Interpreter()
-        interp.run(source, source_path=filepath)
+        if not interp.run(source, source_path=filepath):
+            sys.exit(1)
 
         # If a kennel (server) is running, block until Ctrl+C
         if interp._server:
