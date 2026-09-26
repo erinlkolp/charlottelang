@@ -277,13 +277,20 @@ class Interpreter:
         return block, i
 
     def _execute_block(self, lines: list[Line]):
-        """Execute a sequence of lines."""
+        """Execute a sequence of lines.
+
+        Returns the value of the last statement if it was a bare call such as
+        `double(4)`, `pets.pop()` or `dig_up(url)` (napping otherwise), so the
+        REPL can echo it.
+        """
         i = 0
+        last_value = None
         while i < len(lines):
             line = lines[i]
             text = line.text
             indent = line.indent
             ln = line.line_num
+            last_value = None
 
             # ── snag (import) ──
             if text.startswith("snag "):
@@ -516,9 +523,9 @@ class Interpreter:
                         raise CharlotteError(f"*confused sniff* Can only pop from a bunny (array), not {type(container).__name__}!", ln)
                     try:
                         if args_str.strip():
-                            container.pop(int(self._evaluate(args_str.strip(), ln)))
+                            last_value = container.pop(int(self._evaluate(args_str.strip(), ln)))
                         else:
-                            container.pop()
+                            last_value = container.pop()
                     except IndexError:
                         raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
                     i += 1
@@ -526,7 +533,7 @@ class Interpreter:
 
             # ── side-effect built-ins as standalone statements (nap, file writes, HTTP, beg) ──
             if text.startswith(self._STATEMENT_BUILTINS) and text.endswith(")"):
-                self._evaluate(text, ln)
+                last_value = self._evaluate(text, ln)
                 i += 1
                 continue
 
@@ -552,13 +559,14 @@ class Interpreter:
                 paren_pos = text.index("(")
                 fname = text[:paren_pos]
                 if fname in self.functions:
-                    self._call_function(fname, text[paren_pos + 1:-1], ln)
+                    last_value = self._call_function(fname, text[paren_pos + 1:-1], ln)
                     i += 1
                     continue
 
             raise CharlotteError(
                 f"*suspicious head tilt* Charlotte doesn't understand: \"{text}\"", ln
             )
+        return last_value
 
     # ── Statement handlers ──
 
@@ -2152,7 +2160,10 @@ def run_repl():
                 not buffer[-1].startswith(" ") and
                 len(buffer) == 1):
                 try:
-                    interp._execute_block(parse_lines(stripped))
+                    # Bare calls like `double(4)` echo their result; napping stays silent
+                    val = interp._execute_block(parse_lines(stripped))
+                    if val is not None:
+                        interp.output_fn(str(val), "bark")
                 except CharlotteError as ce:
                     if "Charlotte doesn't understand" in str(ce):
                         try:

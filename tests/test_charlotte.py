@@ -1581,7 +1581,7 @@ class TestReplStatePreservation:
         assert outputs == ["2"]
 
 
-# ─── Fix: function scope isolation (deep copy prevents mutation leak) ──
+# ─── Function scoping: locals stay local, bunnies/collars are shared ──
 
 class TestFunctionScopeIsolation:
     """Names assigned inside a function stay local; bunnies and collars are
@@ -3439,3 +3439,38 @@ class TestStatementBuiltins:
         errors = run_errors('mystery(1)')
         assert len(errors) == 1
         assert "doesn't understand" in errors[0]
+
+
+# ─── REPL: Bare Calls Echo Their Result ─────────────────────
+
+class TestReplEchoesCallResults:
+    """At the REPL prompt, a bare call echoes its result unless it is napping."""
+
+    DOUBLE = ("teach trick double(n):", "  rollover n * 2", ".run")
+
+    def _repl(self, monkeypatch, capsys, *lines):
+        from charlotte import run_repl
+        feed = iter(list(lines) + [".exit"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(feed))
+        run_repl()
+        out = capsys.readouterr().out.splitlines()
+        start = out.index("") + 1  # the banner ends with a blank line
+        return out[start:-1]       # the last line is the goodbye
+
+    def test_function_call_echoes_result(self, monkeypatch, capsys):
+        assert self._repl(monkeypatch, capsys, *self.DOUBLE, "double(4)") == ["8"]
+
+    def test_napping_result_stays_silent(self, monkeypatch, capsys):
+        lines = ("teach trick quiet():", "  fetch x = 1", ".run", "quiet()")
+        assert self._repl(monkeypatch, capsys, *lines) == []
+
+    def test_pop_echoes_popped_value(self, monkeypatch, capsys):
+        out = self._repl(monkeypatch, capsys, 'fetch pets = bunny["rex", "fido"]', "pets.pop()", "pets.toys")
+        assert out == ["fido", "1"]
+
+    def test_bark_of_call_prints_once(self, monkeypatch, capsys):
+        assert self._repl(monkeypatch, capsys, *self.DOUBLE, "bark double(5)") == ["10"]
+
+    def test_function_output_comes_before_result(self, monkeypatch, capsys):
+        lines = ('teach trick greet(who):', '  bark f"hi {who}"', '  rollover who', '.run', 'greet("rex")')
+        assert self._repl(monkeypatch, capsys, *lines) == ["hi rex", "rex"]
