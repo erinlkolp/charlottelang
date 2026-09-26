@@ -14,7 +14,6 @@ import os
 import re
 import random
 import time
-import copy
 import json
 import math
 import urllib.request
@@ -890,8 +889,11 @@ class Interpreter:
                 )
             kwargs = dict(zip(fn["params"], args))
 
-        saved = copy.deepcopy(self.variables)
-        self.variables.update(kwargs)
+        # Python-like scoping: the call gets its own variable table, so names
+        # fetched or reassigned inside stay local, while bunnies and collars
+        # are shared by reference — changes to them are visible to the caller.
+        saved = self.variables
+        self.variables = {**saved, **kwargs}
         result = None
         try:
             self._execute_block(fn["body"])

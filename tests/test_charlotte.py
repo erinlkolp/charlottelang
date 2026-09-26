@@ -1584,9 +1584,10 @@ class TestReplStatePreservation:
 # ─── Fix: function scope isolation (deep copy prevents mutation leak) ──
 
 class TestFunctionScopeIsolation:
-    """Mutations to lists inside functions must not affect the caller's copy."""
+    """Names assigned inside a function stay local; bunnies and collars are
+    shared by reference, so mutations are visible to the caller (like Python)."""
 
-    def test_list_mutation_inside_function_does_not_leak(self):
+    def test_list_mutation_inside_function_is_visible_to_caller(self):
         src = (
             'fetch arr = bunny[1, 2, 3]\n'
             'teach trick mutate(a):\n'
@@ -1594,8 +1595,8 @@ class TestFunctionScopeIsolation:
             'mutate(arr)\n'
             'bark arr.toys'
         )
-        # arr should still have 3 items after calling mutate()
-        assert only(src) == "3"
+        # a and arr are the same bunny, so arr now has 4 items
+        assert only(src) == "4"
 
     def test_scalar_assignment_inside_function_does_not_leak(self):
         src = (
@@ -1624,7 +1625,7 @@ class TestFunctionScopeIsolation:
         assert "caught" in out
         assert out[-1] == "42"
 
-    def test_nested_list_in_global_scope_not_modified(self):
+    def test_list_argument_is_shared_with_caller(self):
         src = (
             'fetch data = bunny[1, 2, 3]\n'
             'teach trick peek(lst):\n'
@@ -1634,8 +1635,8 @@ class TestFunctionScopeIsolation:
             'bark data.toys'
         )
         out = run(src)
-        # Inside the function, lst has 4 items; outside, data still has 3
-        assert out == ["4", "3"]
+        # lst and data are the same bunny, inside and outside the function
+        assert out == ["4", "4"]
 
 
 # ─── Fix: > and < comparison operators ──────────────────────
@@ -3062,3 +3063,104 @@ class TestExpressionParsingFixes:
     def test_parens_around_string_containing_paren(self):
         assert only('bark ("smile :)")') == "smile :)"
         assert only('bark ("a" ~ ")")') == "a)"
+
+
+# ─── Function Calls: Reference Semantics ────────────────────
+
+class TestFunctionReferenceSemantics:
+    """Calling a function must not swap out the caller's variables, so a write
+    whose value comes from a function call lands in the caller's container."""
+
+    FN = 'teach trick double(n):\n  rollover n * 2\n'
+
+    def test_give_function_result(self):
+        assert only(self.FN + 'fetch results = bunny[]\nresults.give(double(5))\nbark results') == "[10]"
+
+    def test_dict_assign_function_result(self):
+        assert only(self.FN + 'fetch d = collar{}\nd["x"] = double(5)\nbark d["x"]') == "10"
+
+    def test_list_assign_function_result(self):
+        assert only(self.FN + 'fetch a = bunny[0]\na[0] = double(5)\nbark a[0]') == "10"
+
+    def test_bury_function_result(self):
+        assert only(self.FN + 'fetch d = collar{}\nd.bury("x", double(5))\nbark d["x"]') == "10"
+
+    def test_give_function_result_in_loop(self):
+        src = self.FN + (
+            'fetch results = bunny[]\n'
+            'zoomies through bunny[1, 2, 3]:\n'
+            '  results.give(double(toy))\n'
+            'bark results\n'
+        )
+        assert only(src) == "[2, 4, 6]"
+
+    def test_mutating_returned_item_updates_original(self):
+        """The find-then-update pattern from apps/pet_shelter_api.bark."""
+        src = (
+            'fetch dogs = bunny[collar{"id": 1, "age": 5}]\n'
+            'teach trick find_dog(id):\n'
+            '  zoomies dog through dogs:\n'
+            '    sniff dog["id"] == id:\n'
+            '      rollover dog\n'
+            'fetch dog = find_dog(1)\n'
+            'dog["age"] = 6\n'
+            'bark dogs[0]["age"]\n'
+        )
+        assert only(src) == "6"
+
+    def test_fetch_inside_function_stays_local(self):
+        errors = run_errors('teach trick make():\n  fetch secret = 1\nmake()\nbark secret\n')
+        assert len(errors) == 1
+        assert "secret" in errors[0]
+
+    def test_reassigning_parameter_does_not_rebind_caller_variable(self):
+        src = (
+            'fetch arr = bunny[1]\n'
+            'teach trick replace(a):\n'
+            '  a = bunny[9, 9]\n'
+            'replace(arr)\n'
+            'bark arr\n'
+        )
+        assert only(src) == "[1]"
+
+    def test_recursion_still_works(self):
+        src = (
+            'teach trick fact(n):\n'
+            '  sniff n <= 1:\n'
+            '    rollover 1\n'
+            '  rollover n * fact(n - 1)\n'
+            'bark fact(10)\n'
+        )
+        assert only(src) == "3628800"
+
+
+class TestPetShelterApp:
+    """apps/pet_shelter_api.bark: updates made through find_dog() must persist."""
+
+    def test_put_and_adopt_persist(self):
+        import socket
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "apps", "pet_shelter_api.bark")
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        assert "kennel 3000" in source
+        with socket.socket() as s:
+            s.bind(("", 0))
+            port = s.getsockname()[1]
+        interp = Interpreter(output_fn=lambda text, kind="bark": None)
+        interp.run(source.replace("kennel 3000", f"kennel {port}"), source_path=path)
+        time.sleep(0.2)
+        base = f"http://localhost:{port}"
+        try:
+            put = urllib.request.Request(f"{base}/dogs/1", data=b'{"age": 6}', method="PUT")
+            urllib.request.urlopen(put).read()
+            with urllib.request.urlopen(f"{base}/dogs/1") as resp:
+                assert json.loads(resp.read())["age"] == 6
+
+            adopt = urllib.request.Request(f"{base}/dogs/2/adopt", data=b"{}", method="POST")
+            urllib.request.urlopen(adopt).read()
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(adopt)
+            assert exc.value.code == 409
+        finally:
+            interp._server.shutdown()
