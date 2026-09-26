@@ -372,7 +372,7 @@ REPL commands:
 
 The REPL supports up-arrow history (via `readline` when available).
 
-Single-line statements and bare expressions auto-execute (bare expressions evaluate and print their result). Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
+Single-line statements and bare expressions auto-execute. Bare expressions and bare calls such as `double(4)` or `pets.pop()` print their result, unless it's `napping` (like Python's REPL). Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
 
 Variables and functions defined in one `.run` session persist for the next — the REPL maintains state across executions. Use `.vars` to inspect current state. To fully reset, restart the REPL.
 

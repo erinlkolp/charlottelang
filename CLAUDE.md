@@ -26,7 +26,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 3. **Interpreter** — `Interpreter` class with:
    - `run(source)` — resets all state then calls `execute()`; returns `False` if the program stopped with an uncaught error
    - `execute(source)` — runs source **without** resetting state (used by REPL for session continuity); same `True`/`False` result
-   - `_execute_block()` — main statement dispatcher
+   - `_execute_block()` — main statement dispatcher; returns the last statement's value when it was a bare call (`double(4)`, `pets.pop()`), which the REPL echoes
    - `_evaluate()` — recursive expression evaluator. Splits operators loosest first (`or`, `and`, `not`, comparisons, `~`, `+ -`, `* / // %`, unary `-`, `**`), then applies postfix `[index]` / `.toys` / `.keys` / `.values` / `.method()`, then built-ins, calls, and names. Keep new operators in this order.
    - `_handle_*()` methods for each statement type
    - `_call_function()` — calls user-defined functions with their own shallow variable table: names fetched or reassigned inside stay local, while bunnies/collars are shared by reference (Python-like). The caller's table is never replaced.
@@ -35,7 +35,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
    - `env_allowlist` constructor param — `None` (default blocklist) or a set of permitted env var names
    - `url_allowlist` constructor param — `None` (any http/https) or a set of permitted hostnames
    - `http_timeout` constructor param — request timeout in seconds (default 10, max 30)
-4. **REPL** — `run_repl()` with buffer-based multi-line input; uses `execute()` so variables persist across `.run` commands
+4. **REPL** — `run_repl()` with buffer-based multi-line input; uses `execute()` so variables persist across `.run` commands. Single lines echo their non-napping result. `print_quick_ref()` is the `.help` card (a raw string; keep every row the same display width, which a test checks)
 5. **CLI** — `main()` entry point with `run`, `repl`, `help` commands. Errors print to stderr, and `run` exits with status 1 on an uncaught error.
 
 ## Language Keyword Mapping
@@ -106,7 +106,7 @@ The interpreter is a single-file design (`charlotte.py`) with these components:
 
 ## Testing
 
-Run the full test suite with pytest (566 tests):
+Run the full test suite with pytest (574 tests):
 
 ```bash
 python -m pytest tests/
@@ -118,7 +118,7 @@ Or run a specific class:
 python -m pytest tests/ -k TestLoops -v
 ```
 
-The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scoping and reference semantics, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing, `dig_up`/`bury` HTTP requests, `chew_json`/`yap_json` JSON serialization, `url_allowlist` host restriction, parenthesized expression grouping, `**` operator precedence, `stranger` string truthiness, chained indexing `arr[i][j]`, unary minus `-x`, `floor`/`ceil`, single-quoted f-strings `f'...'`, negative/non-numeric loop count errors, destructuring assignment, named function arguments, sandboxed file I/O, regex built-ins, HTTP server `guard`/`kennel`/`leave_kennel`, postfix/`not`/unary-minus precedence, f-strings next to operators, CLI exit status, HTTP server robustness (501s, `request` shadowing, literal routes), redirect checks, foreach/recursion guards, built-ins as statements). Example files and `apps/pet_shelter_api.bark` are also smoke-tested.
+The test file is `tests/test_charlotte.py`. It covers tokenizer, I/O, variables, arithmetic, comparisons, control flow, loops, functions, arrays, dicts, strings, try/catch, imports, built-ins, slicing, escape sequences, and all recently added features (`woof` comments, escaped-quote arg parsing, `squirrel`/`nap`/`sniff_env`, `beg`, named `zoomies`, `bark` blank line, `howl` stderr, `>` / `<` operators, REPL state persistence, function scoping and reference semantics, collar colon-split with slices, bounded error wrapping, `sniff_env` allowlist/blocklist, `snag` path sandboxing, `dig_up`/`bury` HTTP requests, `chew_json`/`yap_json` JSON serialization, `url_allowlist` host restriction, parenthesized expression grouping, `**` operator precedence, `stranger` string truthiness, chained indexing `arr[i][j]`, unary minus `-x`, `floor`/`ceil`, single-quoted f-strings `f'...'`, negative/non-numeric loop count errors, destructuring assignment, named function arguments, sandboxed file I/O, regex built-ins, HTTP server `guard`/`kennel`/`leave_kennel`, postfix/`not`/unary-minus precedence, f-strings next to operators, CLI exit status, HTTP server robustness (501s, `request` shadowing, literal routes), redirect checks, foreach/recursion guards, built-ins as statements, REPL echo of bare calls, quick-reference card contents and alignment). Example files and `apps/pet_shelter_api.bark` are also smoke-tested.
 
 To manually verify examples:
 
