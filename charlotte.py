@@ -94,6 +94,10 @@ class Interpreter:
 
     MAX_LOOPS = 10_000
 
+    # Built-ins with side effects that can also stand alone as a statement,
+    # e.g. `bury(url, data)` without `fetch resp = ...`
+    _STATEMENT_BUILTINS: tuple = ("nap(", "mark_file(", "append_file(", "dig_up(", "bury(", "beg(")
+
     # Substrings that mark an env var name as sensitive (case-insensitive).
     # Access to any matching name is blocked unless it appears in env_allowlist.
     _ENV_SENSITIVE_PATTERNS: tuple = (
@@ -520,14 +524,8 @@ class Interpreter:
                     i += 1
                     continue
 
-            # ── nap() as a standalone statement ──
-            if text.startswith("nap(") and text.endswith(")"):
-                self._evaluate(text, ln)
-                i += 1
-                continue
-
-            # ── mark_file() / append_file() as standalone statements ──
-            if (text.startswith("mark_file(") or text.startswith("append_file(")) and text.endswith(")"):
+            # ── side-effect built-ins as standalone statements (nap, file writes, HTTP, beg) ──
+            if text.startswith(self._STATEMENT_BUILTINS) and text.endswith(")"):
                 self._evaluate(text, ln)
                 i += 1
                 continue
@@ -661,8 +659,12 @@ class Interpreter:
         if not isinstance(arr, list):
             raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
+        # A bunny that keeps growing inside its own loop would zoom forever
+        max_laps = max(self.MAX_LOOPS, len(arr))
         try:
             for z, item in enumerate(arr):
+                if z >= max_laps:
+                    raise CharlotteError("Infinite zoomies! The bunny keeps growing — Charlotte collapsed.", ln)
                 self.variables["lap"] = z
                 self.variables["toy"] = item
                 try:
@@ -708,8 +710,12 @@ class Interpreter:
         if not isinstance(arr, list):
             raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
+        # A bunny that keeps growing inside its own loop would zoom forever
+        max_laps = max(self.MAX_LOOPS, len(arr))
         try:
             for z, item in enumerate(arr):
+                if z >= max_laps:
+                    raise CharlotteError("Infinite zoomies! The bunny keeps growing — Charlotte collapsed.", ln)
                 self.variables["lap"] = z
                 self.variables[var_name] = item
                 try:
@@ -923,6 +929,10 @@ class Interpreter:
             raise CharlotteError("*confused head tilt* shake off (break) outside a loop!", ln)
         except CharlotteContinue:
             raise CharlotteError("*confused head tilt* keep going (continue) outside a loop!", ln)
+        except RecursionError:
+            raise CharlotteError(
+                f"*dizzy* Charlotte chased her tail too long! Too many nested calls in {name}().", ln
+            )
         finally:
             self.variables = saved
         return result

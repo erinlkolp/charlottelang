@@ -3353,3 +3353,89 @@ class TestHTTPRedirectChecks:
             assert "Only http:// and https://" in out[0][1]
         finally:
             server.shutdown()
+
+
+# ─── Loop and Recursion Guards ──────────────────────────────
+
+class TestLoopAndRecursionGuards:
+    """Runaway foreach loops and runaway recursion end with a Charlotte error."""
+
+    def test_foreach_over_growing_list_is_capped(self):
+        errors = run_errors('fetch xs = bunny[1]\nzoomies through xs:\n  xs.give(1)\n')
+        assert len(errors) == 1
+        assert "Infinite zoomies" in errors[0]
+
+    def test_named_foreach_over_growing_list_is_capped(self):
+        errors = run_errors('fetch xs = bunny[1]\nzoomies x through xs:\n  xs.give(x)\n')
+        assert len(errors) == 1
+        assert "Infinite zoomies" in errors[0]
+
+    def test_foreach_list_may_grow_like_a_work_queue(self):
+        src = (
+            'fetch queue = bunny[3]\n'
+            'fetch seen = bunny[]\n'
+            'zoomies through queue:\n'
+            '  seen.give(toy)\n'
+            '  sniff toy > 0:\n'
+            '    queue.give(toy - 1)\n'
+            'bark seen\n'
+        )
+        assert only(src) == "[3, 2, 1, 0]"
+
+    def test_foreach_over_list_longer_than_cap_still_allowed(self):
+        src = (
+            'fetch xs = bunny[]\n'
+            'zoomies 10000 times:\n'
+            '  xs.give(lap)\n'
+            'xs.give(10000)\n'
+            'fetch total = 0\n'
+            'zoomies through xs:\n'
+            '  total = total + 1\n'
+            'bark total\n'
+        )
+        assert only(src) == "10001"
+
+    def test_runaway_recursion_gives_friendly_error(self):
+        errors = run_errors('teach trick forever(n):\n  rollover forever(n + 1)\nforever(0)\n')
+        assert len(errors) == 1
+        assert "chased her tail" in errors[0]
+        assert "forever()" in errors[0]
+
+    def test_runaway_recursion_can_be_caught(self):
+        src = (
+            'teach trick forever(n):\n'
+            '  rollover forever(n + 1)\n'
+            'careful:\n'
+            '  forever(0)\n'
+            'oops e:\n'
+            '  bark "caught"\n'
+            'bark "still running"\n'
+        )
+        assert run(src) == ["caught", "still running"]
+
+
+# ─── Side-effect Built-ins as Statements ────────────────────
+
+class TestStatementBuiltins:
+    """dig_up, bury, and beg can stand alone on a line, like nap and mark_file."""
+
+    @patch("charlotte.urllib.request.OpenerDirector.open")
+    def test_bury_as_statement(self, mock_open):
+        mock_open.return_value = _mock_response('{"ok": true}', 201)
+        assert run('bury("https://example.com/api", collar{"a": 1})\nbark "sent"') == ["sent"]
+        assert mock_open.called
+
+    @patch("charlotte.urllib.request.OpenerDirector.open")
+    def test_dig_up_as_statement(self, mock_open):
+        mock_open.return_value = _mock_response("pong", 200)
+        assert run('dig_up("https://example.com/ping")\nbark "pinged"') == ["pinged"]
+        assert mock_open.called
+
+    def test_beg_as_statement(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "")
+        assert run('beg("Press enter to continue")\nbark "continued"') == ["continued"]
+
+    def test_unknown_call_still_not_understood(self):
+        errors = run_errors('mystery(1)')
+        assert len(errors) == 1
+        assert "doesn't understand" in errors[0]
