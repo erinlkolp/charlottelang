@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CharlotteLang Interpreter v4.5
+CharlotteLang Interpreter v4.6
 A Pythonic programming language with chihuahua soul and pitbull energy.
 
 Usage:
@@ -179,7 +179,7 @@ class Interpreter:
     def _http_request(self, url: str, method: str, data=None, headers=None, ln: int = 0):
         """Perform an HTTP request and return a collar (dict) with status, body, headers."""
         self._validate_url(url, ln)
-        req_headers = {"User-Agent": "CharlotteLang/4.5"}
+        req_headers = {"User-Agent": "CharlotteLang/4.6"}
         if headers and isinstance(headers, dict):
             req_headers.update({str(k): str(v) for k, v in headers.items()})
         body_bytes = None
@@ -2086,7 +2086,7 @@ class Interpreter:
 
 def run_repl():
     """Interactive CharlotteLang REPL."""
-    print("🐕 CharlotteLang v4.5 REPL")
+    print("🐕 CharlotteLang v4.6 REPL")
     print("   Type Charlotte code below. Commands:")
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
@@ -2287,7 +2287,7 @@ def print_quick_ref():
 
 def main():
     if len(sys.argv) < 2:
-        print("🐕 CharlotteLang v4.5")
+        print("🐕 CharlotteLang v4.6")
         print()
         print("Usage:")
         print("  charlotte run <file.bark>   Run a .bark file")
