@@ -1002,6 +1002,43 @@ class Interpreter:
             i += 1
         return False
 
+    def _is_complete_fstring(self, expr: str) -> bool:
+        """Check if expr is a single complete f-string (not f"a" ~ f"b").
+
+        Quotes inside {...} belong to the embedded expression, so only a quote
+        outside the braces can close the f-string.
+        """
+        if len(expr) < 3 or expr[0] != "f" or expr[1] not in ('"', "'"):
+            return False
+        q = expr[1]
+        depth = 0
+        in_str = None
+        i = 2
+        while i < len(expr):
+            ch = expr[i]
+            if depth == 0:
+                if ch == "\\" or (ch == "{" and expr[i + 1:i + 2] == "{"):
+                    i += 2
+                    continue
+                if ch == "{":
+                    depth = 1
+                elif ch == q:
+                    return i == len(expr) - 1
+            elif in_str:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+            elif ch in ('"', "'"):
+                in_str = ch
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            i += 1
+        return False
+
     def _count_preceding_backslashes(self, s: str, pos: int) -> int:
         """Count consecutive backslashes immediately before position pos."""
         count = 0
@@ -1082,8 +1119,8 @@ class Interpreter:
         if self._is_complete_string(expr):
             return self._process_escapes(expr[1:-1])
 
-        # f-strings: f"..." or f'...'
-        if (expr.startswith('f"') and expr.endswith('"')) or (expr.startswith("f'") and expr.endswith("'")):
+        # f-strings: f"..." or f'...' — must be a single complete f-string, not f"a" ~ f"b"
+        if self._is_complete_fstring(expr):
             inner = expr[2:-1]
             result = []
             i = 0
@@ -1213,56 +1250,170 @@ class Interpreter:
             pass
 
         # Parenthesized expression — only strip if the opening ( matches the closing )
+        # (parens inside string literals, like ("smile :)"), don't count)
         if expr.startswith("(") and expr.endswith(")"):
             depth = 0
+            in_str = False
+            str_ch = None
             matches_end = True
             for _i, _ch in enumerate(expr):
-                if _ch == "(":
-                    depth += 1
-                elif _ch == ")":
-                    depth -= 1
+                if not in_str and _ch in ('"', "'"):
+                    in_str = True
+                    str_ch = _ch
+                elif in_str and _ch == str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                    in_str = False
+                elif not in_str:
+                    if _ch == "(":
+                        depth += 1
+                    elif _ch == ")":
+                        depth -= 1
                 if depth == 0 and _i < len(expr) - 1:
                     matches_end = False
                     break
             if matches_end:
                 return self._evaluate(expr[1:-1], ln)
 
+        # ── Operators, lowest precedence first ──
+        # or → and → not → comparisons → ~ → + - → * / // % → unary - → ** → postfix
+        # (.toys, .keys, .values, .method(), [index]) → calls and names.
+        # Splitting on the loosest operator first means `"n: " ~ arr.toys` applies
+        # .toys to arr only, not to the whole concatenation.
+
+        # Logical OR / AND (or has lower precedence than and; scan left to right, respecting parens)
+        for op, handler in [(" or ", "or"), (" and ", "and")]:
+            idx = self._find_operator(expr, op)
+            if idx != -1:
+                left = self._evaluate(expr[:idx], ln)
+                if handler == "and":
+                    return self._evaluate(expr[idx + len(op):], ln) if self._is_truthy(left) else left
+                else:
+                    return left if self._is_truthy(left) else self._evaluate(expr[idx + len(op):], ln)
+
+        # Logical NOT — binds tighter than and/or, looser than comparisons
+        # (`not a and b` is `(not a) and b`; `not a == b` is `not (a == b)`)
+        if expr.startswith("not "):
+            return not self._is_truthy(self._evaluate(expr[4:], ln))
+
+        def _in_op(a, b):
+            if not isinstance(b, (list, dict, str)):
+                raise CharlotteError(f"*confused sniff* Cannot use 'in' on {type(b).__name__}!", ln)
+            return a in b if isinstance(b, (list, dict)) else str(a) in b
+
+        def _not_in_op(a, b):
+            if not isinstance(b, (list, dict, str)):
+                raise CharlotteError(f"*confused sniff* Cannot use 'not in' on {type(b).__name__}!", ln)
+            return a not in b if isinstance(b, (list, dict)) else str(a) not in b
+
+        # Comparisons — longer forms checked before shorter to avoid partial matches
+        comparisons = [
+            (" is bigger than ", lambda a, b: a > b),
+            (" is smaller than ", lambda a, b: a < b),
+            (" >= ", lambda a, b: a >= b),
+            (" <= ", lambda a, b: a <= b),
+            (" > ", lambda a, b: a > b),
+            (" < ", lambda a, b: a < b),
+            (" not equals ", lambda a, b: a != b),
+            (" equals ", lambda a, b: a == b),
+            (" != ", lambda a, b: a != b),
+            (" == ", lambda a, b: a == b),
+            (" not in ", _not_in_op),
+            (" in ", _in_op),
+        ]
+        for op_str, op_fn in comparisons:
+            idx = self._find_operator(expr, op_str)
+            if idx != -1:
+                left = self._evaluate(expr[:idx], ln)
+                right = self._evaluate(expr[idx + len(op_str):], ln)
+                return op_fn(left, right)
+
+        # String concatenation ~ (lower precedence than arithmetic, higher than comparisons)
+        idx = self._find_operator(expr, " ~ ")
+        if idx != -1:
+            parts = []
+            while idx != -1:
+                parts.append(expr[:idx])
+                expr = expr[idx + 3:]
+                idx = self._find_operator(expr, " ~ ")
+            parts.append(expr)
+            return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
+
+        # Arithmetic: + - (equal precedence, left-associative: scan for rightmost)
+        best_add_op = None
+        best_add_idx = -1
+        for op in (" + ", " - "):
+            idx = self._rfind_operator(expr, op)
+            if idx > best_add_idx:
+                best_add_idx = idx
+                best_add_op = op
+        if best_add_idx > 0:
+            left = self._evaluate(expr[:best_add_idx], ln)
+            right = self._evaluate(expr[best_add_idx + len(best_add_op):], ln)
+            if best_add_op == " + ":
+                if isinstance(left, str) or isinstance(right, str):
+                    return str(left) + str(right)
+                return left + right
+            return left - right
+
+        # Arithmetic: * / // % (equal precedence, left-associative: scan for rightmost)
+        best_mul_op = None
+        best_mul_idx = -1
+        for op in (" // ", " / ", " * ", " % "):
+            idx = self._rfind_operator(expr, op)
+            if idx > best_mul_idx:
+                best_mul_idx = idx
+                best_mul_op = op
+        if best_mul_idx > 0:
+            left = self._evaluate(expr[:best_mul_idx], ln)
+            right = self._evaluate(expr[best_mul_idx + len(best_mul_op):], ln)
+            if best_mul_op in (" / ", " // ", " % ") and right == 0:
+                raise CharlotteError("Can't divide by zero — stranger danger!", ln)
+            if best_mul_op == " // ":
+                return left // right
+            if best_mul_op == " * ":
+                if isinstance(left, str) and isinstance(right, int):
+                    return left * right
+                if isinstance(left, int) and isinstance(right, str):
+                    return right * left
+                return left * right
+            if best_mul_op == " % ":
+                return left % right
+            return left / right
+
+        # Unary minus: -expr  (e.g. -x, -(a + b), -myFunc(), -arr[0])
+        # Tighter than * / // %, looser than ** — so -2 ** 2 is -4, like Python.
+        if expr.startswith("-") and len(expr) > 1:
+            return -self._evaluate(expr[1:], ln)
+
+        # Arithmetic: ** (power) — highest arithmetic precedence, right-to-left
+        idx = self._find_operator(expr, " ** ")
+        if idx != -1:
+            left = self._evaluate(expr[:idx], ln)
+            right = self._evaluate(expr[idx + 4:], ln)
+            return left ** right
+
         # Indexing and slicing: expr[idx], expr[start:stop], expr[start:stop:step]
         # Supports chained access like arr[0][1] by finding the last top-level [...].
-        # We skip this block if there are top-level binary operators in the expression
-        # (e.g. arr[0] + arr[1]) — those are handled by the arithmetic handlers below.
+        # Binary operators were already split off above (e.g. arr[0] + arr[1]), so
+        # the trailing [...] belongs to the whole remaining expression.
         if "[" in expr and expr.endswith("]"):
-            # Skip if top-level binary operators are present (let arithmetic/comparison
-            # handlers split the expression first)
-            _has_top_level_op = False
-            for _test_op in (" + ", " - ", " * ", " / ", " // ", " ** ",
-                             " and ", " or ", " ~ ", " == ", " != ",
-                             " >= ", " <= ", " > ", " < ",
-                             " equals ", " not equals ",
-                             " is bigger than ", " is smaller than ",
-                             " in ", " not in "):
-                if self._find_operator(expr, _test_op) != -1:
-                    _has_top_level_op = True
-                    break
             # Find the last top-level [ whose matching ] is the final char.
             last_bracket_pos = -1
-            if not _has_top_level_op:
-                _depth = 0
-                _in_str = False
-                _str_ch = None
-                for _i, _ch in enumerate(expr):
-                    if not _in_str and _ch in ('"', "'"):
-                        _in_str = True
-                        _str_ch = _ch
-                    elif _in_str and _ch == _str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
-                        _in_str = False
-                    if not _in_str:
-                        if _ch == '[':
-                            if _depth == 0:
-                                last_bracket_pos = _i
-                            _depth += 1
-                        elif _ch == ']':
-                            _depth -= 1
+            _depth = 0
+            _in_str = False
+            _str_ch = None
+            for _i, _ch in enumerate(expr):
+                if not _in_str and _ch in ('"', "'"):
+                    _in_str = True
+                    _str_ch = _ch
+                elif _in_str and _ch == _str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                    _in_str = False
+                if not _in_str:
+                    if _ch == '[':
+                        if _depth == 0:
+                            last_bracket_pos = _i
+                        _depth += 1
+                    elif _ch == ']':
+                        _depth -= 1
             if last_bracket_pos > 0 and not (expr.startswith("bunny[") and last_bracket_pos == 5):
                 base_expr = expr[:last_bracket_pos]
                 key_expr = expr[last_bracket_pos + 1:-1]
@@ -1409,112 +1560,6 @@ class Interpreter:
                         return val.pop()
                     except IndexError:
                         raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
-
-        # Logical NOT
-        if expr.startswith("not "):
-            return not self._is_truthy(self._evaluate(expr[4:], ln))
-
-        # Logical OR / AND (or has lower precedence than and; scan left to right, respecting parens)
-        for op, handler in [(" or ", "or"), (" and ", "and")]:
-            idx = self._find_operator(expr, op)
-            if idx != -1:
-                left = self._evaluate(expr[:idx], ln)
-                if handler == "and":
-                    return self._evaluate(expr[idx + len(op):], ln) if self._is_truthy(left) else left
-                else:
-                    return left if self._is_truthy(left) else self._evaluate(expr[idx + len(op):], ln)
-
-        def _in_op(a, b):
-            if not isinstance(b, (list, dict, str)):
-                raise CharlotteError(f"*confused sniff* Cannot use 'in' on {type(b).__name__}!", ln)
-            return a in b if isinstance(b, (list, dict)) else str(a) in b
-
-        def _not_in_op(a, b):
-            if not isinstance(b, (list, dict, str)):
-                raise CharlotteError(f"*confused sniff* Cannot use 'not in' on {type(b).__name__}!", ln)
-            return a not in b if isinstance(b, (list, dict)) else str(a) not in b
-
-        # Comparisons — longer forms checked before shorter to avoid partial matches
-        comparisons = [
-            (" is bigger than ", lambda a, b: a > b),
-            (" is smaller than ", lambda a, b: a < b),
-            (" >= ", lambda a, b: a >= b),
-            (" <= ", lambda a, b: a <= b),
-            (" > ", lambda a, b: a > b),
-            (" < ", lambda a, b: a < b),
-            (" not equals ", lambda a, b: a != b),
-            (" equals ", lambda a, b: a == b),
-            (" != ", lambda a, b: a != b),
-            (" == ", lambda a, b: a == b),
-            (" not in ", _not_in_op),
-            (" in ", _in_op),
-        ]
-        for op_str, op_fn in comparisons:
-            idx = self._find_operator(expr, op_str)
-            if idx != -1:
-                left = self._evaluate(expr[:idx], ln)
-                right = self._evaluate(expr[idx + len(op_str):], ln)
-                return op_fn(left, right)
-
-        # String concatenation ~ (lower precedence than arithmetic, higher than comparisons)
-        idx = self._find_operator(expr, " ~ ")
-        if idx != -1:
-            parts = []
-            while idx != -1:
-                parts.append(expr[:idx])
-                expr = expr[idx + 3:]
-                idx = self._find_operator(expr, " ~ ")
-            parts.append(expr)
-            return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
-
-        # Arithmetic: + - (equal precedence, left-associative: scan for rightmost)
-        best_add_op = None
-        best_add_idx = -1
-        for op in (" + ", " - "):
-            idx = self._rfind_operator(expr, op)
-            if idx > best_add_idx:
-                best_add_idx = idx
-                best_add_op = op
-        if best_add_idx > 0:
-            left = self._evaluate(expr[:best_add_idx], ln)
-            right = self._evaluate(expr[best_add_idx + len(best_add_op):], ln)
-            if best_add_op == " + ":
-                if isinstance(left, str) or isinstance(right, str):
-                    return str(left) + str(right)
-                return left + right
-            return left - right
-
-        # Arithmetic: * / // % (equal precedence, left-associative: scan for rightmost)
-        best_mul_op = None
-        best_mul_idx = -1
-        for op in (" // ", " / ", " * ", " % "):
-            idx = self._rfind_operator(expr, op)
-            if idx > best_mul_idx:
-                best_mul_idx = idx
-                best_mul_op = op
-        if best_mul_idx > 0:
-            left = self._evaluate(expr[:best_mul_idx], ln)
-            right = self._evaluate(expr[best_mul_idx + len(best_mul_op):], ln)
-            if best_mul_op in (" / ", " // ") and right == 0:
-                raise CharlotteError("Can't divide by zero — stranger danger!", ln)
-            if best_mul_op == " // ":
-                return left // right
-            if best_mul_op == " * ":
-                if isinstance(left, str) and isinstance(right, int):
-                    return left * right
-                if isinstance(left, int) and isinstance(right, str):
-                    return right * left
-                return left * right
-            if best_mul_op == " % ":
-                return left % right
-            return left / right
-
-        # Arithmetic: ** (power) — highest arithmetic precedence, right-to-left
-        idx = self._find_operator(expr, " ** ")
-        if idx != -1:
-            left = self._evaluate(expr[:idx], ln)
-            right = self._evaluate(expr[idx + 4:], ln)
-            return left ** right
 
         # Built-in functions
         if expr.startswith("howBig(") and expr.endswith(")"):
@@ -1737,10 +1782,6 @@ class Interpreter:
             fname = expr[:paren_pos]
             if fname in self.functions:
                 return self._call_function(fname, expr[paren_pos + 1:-1], ln)
-
-        # Unary minus: -expr  (e.g. -x, -(a + b), -myFunc())
-        if expr.startswith("-") and len(expr) > 1:
-            return -self._evaluate(expr[1:], ln)
 
         # Variable lookup
         if expr in self.variables:

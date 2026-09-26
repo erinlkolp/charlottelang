@@ -2974,3 +2974,91 @@ class TestBugFixes:
         interp.run("kennel 38391\nleave_kennel\n")
         assert interp._server_shutdown.is_set()
 
+
+
+# ─── Operator Precedence (postfix, not, unary minus) ────────
+
+class TestPostfixPrecedence:
+    """.toys / .method() / [index] bind to their operand, not the whole expression."""
+
+    def test_concat_with_method_call(self):
+        assert only('fetch name = "charlotte"\nbark "Hi " ~ name.upper()') == "Hi CHARLOTTE"
+
+    def test_concat_with_toys(self):
+        assert only('fetch s = "hello"\nbark "len: " ~ s.toys') == "len: 5"
+
+    def test_plus_with_method_call(self):
+        assert only('fetch s = "b"\nbark "a" + s.upper()') == "aB"
+
+    def test_comparison_with_toys_in_while(self):
+        src = (
+            'fetch arr = bunny[1, 2, 3]\n'
+            'fetch i = 0\n'
+            'zoomies while i < arr.toys:\n'
+            '  i = i + 1\n'
+            'bark i\n'
+        )
+        assert only(src) == "3"
+
+    def test_arithmetic_with_toys(self):
+        assert only('fetch arr = bunny[1, 2, 3]\nbark 1 + arr.toys') == "4"
+        assert only('fetch arr = bunny[1, 2, 3]\nbark 2 ** arr.toys') == "8"
+
+    def test_and_with_toys(self):
+        """The bounds check from examples/server.bark."""
+        src = (
+            'fetch dogs = bunny["a", "b"]\n'
+            'fetch i = 1\n'
+            'sniff i >= 0 and i < dogs.toys:\n'
+            '  bark "ok"\n'
+        )
+        assert only(src) == "ok"
+
+    def test_modulo_of_indexed_values(self):
+        assert only('fetch arr = bunny[7, 4]\nbark arr[0] % arr[1]') == "3"
+
+    def test_negate_indexed_value(self):
+        assert only('fetch arr = bunny[7, 4]\nbark -arr[0]') == "-7"
+        assert only('fetch arr = bunny[7, 4]\nbark -arr[0] + 1') == "-6"
+
+    def test_negate_toys(self):
+        assert only('fetch arr = bunny[7, 4]\nbark -arr.toys') == "-2"
+
+    def test_unary_minus_binds_looser_than_power(self):
+        assert only('bark -2 ** 2') == "-4"
+        assert only('bark 2 ** -1') == "0.5"
+
+    def test_not_binds_tighter_than_and_or(self):
+        assert only('bark not stranger and stranger') == "False"
+        assert only('bark not loyal or loyal') == "True"
+
+    def test_not_with_toys(self):
+        assert only('fetch e = bunny[]\nbark not e.toys') == "True"
+
+    def test_not_still_looser_than_comparison(self):
+        assert only('bark not loyal == stranger') == "True"
+
+
+class TestExpressionParsingFixes:
+    """f-strings next to operators, % by zero, and parens inside strings."""
+
+    def test_fstring_concat(self):
+        assert only('fetch a = 1\nfetch b = 2\nbark f"{a}" ~ "-" ~ f"{b}"') == "1-2"
+
+    def test_fstring_comparison(self):
+        assert only('fetch a = 1\nbark f"{a}" == "1"') == "True"
+
+    def test_fstring_with_same_quotes_inside_braces(self):
+        assert only('fetch d = collar{"k": "v"}\nbark f"{d["k"]}"') == "v"
+
+    def test_fstring_method_call(self):
+        assert only('fetch n = "rex"\nbark f"{n}!".upper()') == "REX!"
+
+    def test_modulo_by_zero_is_charlotte_error(self):
+        errors = run_errors('bark 5 % 0')
+        assert len(errors) == 1
+        assert "divide by zero" in errors[0]
+
+    def test_parens_around_string_containing_paren(self):
+        assert only('bark ("smile :)")') == "smile :)"
+        assert only('bark ("a" ~ ")")') == "a)"
