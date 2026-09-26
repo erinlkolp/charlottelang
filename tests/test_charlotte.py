@@ -3474,3 +3474,35 @@ class TestReplEchoesCallResults:
     def test_function_output_comes_before_result(self, monkeypatch, capsys):
         lines = ('teach trick greet(who):', '  bark f"hi {who}"', '  rollover who', '.run', 'greet("rex")')
         assert self._repl(monkeypatch, capsys, *lines) == ["hi rex", "rex"]
+
+
+# ─── Quick Reference Card (.help / charlotte help) ──────────
+
+class TestQuickReferenceCard:
+    """The quick reference lists current built-ins and renders as a clean box."""
+
+    def _card(self, capsys):
+        from charlotte import print_quick_ref
+        print_quick_ref()
+        return [line for line in capsys.readouterr().out.splitlines() if line]
+
+    def test_lists_newer_features(self, capsys):
+        card = "\n".join(self._card(capsys))
+        for entry in ("fetch a, b = arr", 'greet(who: "Rex")', "f'hi {x}'",
+                      "howBig(x)", "treat(x)", "yap(x)", "floor(x) / ceil(x)",
+                      "sniff_file(", "mark_file(", "append_file(",
+                      "nose_for(", "nose_for_all(", "nose_swap("):
+            assert entry in card, entry
+
+    def test_escape_sequences_shown_literally(self, capsys):
+        assert any(r'"hello\nworld"' in line for line in self._card(capsys))
+
+    def test_every_row_has_the_same_width(self, capsys):
+        import unicodedata
+
+        def width(s):
+            return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+        card = self._card(capsys)
+        assert card[0].startswith("┌") and card[-1].startswith("└")
+        assert {width(line) for line in card} == {width(card[0])}

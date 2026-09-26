@@ -2186,7 +2186,8 @@ def run_repl():
 
 def print_quick_ref():
     """Print the CharlotteLang quick reference."""
-    print("""
+    # Raw string so the card shows escape sequences like \n literally
+    print(r"""
 ┌──────────────────────────────────────────────────────────┐
 │  🐕 CharlotteLang Quick Reference                        │
 ├──────────────────────────────────────────────────────────┤
@@ -2195,6 +2196,7 @@ def print_quick_ref():
 │  howl "oops"             → print to stderr               │
 │  fetch x = 10            → create variable               │
 │  x = 20                  → reassign variable             │
+│  fetch a, b = arr        → unpack a bunny into names     │
 │  growl "error!"          → throw error                   │
 │                                                          │
 │  sniff x is bigger than 5:                               │
@@ -2218,6 +2220,7 @@ def print_quick_ref():
 │  teach trick greet(who):                                 │
 │    bark f"hi {who}"                                      │
 │    rollover "done"       → return                        │
+│  greet(who: "Rex")       → call with a named argument    │
 │                                                          │
 │  shake off               → break                         │
 │  keep going              → continue                      │
@@ -2244,13 +2247,18 @@ def print_quick_ref():
 │  str.trim()              → strip whitespace              │
 │  str.upper() / .lower()  → case conversion               │
 │  "hello\nworld"          → escape sequences (\n\t\\\")   │
+│  f"hi {x}" / f'hi {x}'   → f-string (either quotes)      │
 │  loyal / stranger        → true / false                  │
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
+│  howBig(x)               → length of bunny/string/collar │
 │  goodBoy(x)              → convert to int                │
+│  treat(x)                → convert to float              │
+│  yap(x)                  → convert to string             │
 │  loyal(x)                → convert to bool               │
 │  abs(x)                  → absolute value                │
-│  round(x) / round(x, n)  → round a number               │
+│  floor(x) / ceil(x)      → round down / round up         │
+│  round(x) / round(x, n)  → round a number                │
 │  min(a, b) / min(list)   → minimum value                 │
 │  max(a, b) / max(list)   → maximum value                 │
 │  beg("prompt")           → read user input (string)      │
@@ -2267,6 +2275,14 @@ def print_quick_ref():
 │  bury(url, data, headers)→ POST with custom headers      │
 │  chew_json(string)       → parse JSON → collar/bunny     │
 │  yap_json(value)         → serialize to JSON string      │
+│                                                          │
+│  sniff_file("a.txt")     → read file (napping if none)   │
+│  mark_file("a.txt", s)   → write file (overwrite)        │
+│  append_file("a.txt", s) → append to file                │
+│                                                          │
+│  nose_for(text, pat)     → first regex match or napping  │
+│  nose_for_all(text, pat) → all regex matches (bunny)     │
+│  nose_swap(text, pat, r) → regex replace                 │
 │                                                          │
 │  woof this is a comment  → comment (always)              │
 │  sniff this is ignored   → comment (only without colon)  │
