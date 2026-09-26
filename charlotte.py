@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CharlotteLang Interpreter v4.5
+CharlotteLang Interpreter v4.6
 A Pythonic programming language with chihuahua soul and pitbull energy.
 
 Usage:
@@ -14,7 +14,6 @@ import os
 import re
 import random
 import time
-import copy
 import json
 import math
 import urllib.request
@@ -95,6 +94,10 @@ class Interpreter:
 
     MAX_LOOPS = 10_000
 
+    # Built-ins with side effects that can also stand alone as a statement,
+    # e.g. `bury(url, data)` without `fetch resp = ...`
+    _STATEMENT_BUILTINS: tuple = ("nap(", "mark_file(", "append_file(", "dig_up(", "bury(", "beg(")
+
     # Substrings that mark an env var name as sensitive (case-insensitive).
     # Access to any matching name is blocked unless it appears in env_allowlist.
     _ENV_SENSITIVE_PATTERNS: tuple = (
@@ -124,7 +127,7 @@ class Interpreter:
         self.variables: dict = {}
         self.functions: dict = {}
         def _default_output(text, kind="bark"):
-            if kind == "howl":
+            if kind in ("howl", "error"):
                 print(text, file=sys.stderr)
             else:
                 print(text)
@@ -176,7 +179,7 @@ class Interpreter:
     def _http_request(self, url: str, method: str, data=None, headers=None, ln: int = 0):
         """Perform an HTTP request and return a collar (dict) with status, body, headers."""
         self._validate_url(url, ln)
-        req_headers = {"User-Agent": "CharlotteLang/4.5"}
+        req_headers = {"User-Agent": "CharlotteLang/4.6"}
         if headers and isinstance(headers, dict):
             req_headers.update({str(k): str(v) for k, v in headers.items()})
         body_bytes = None
@@ -188,8 +191,17 @@ class Interpreter:
             if "Content-Type" not in req_headers:
                 req_headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=body_bytes, headers=req_headers, method=method)
+        interpreter = self
+
+        class CheckedRedirectHandler(urllib.request.HTTPRedirectHandler):
+            """Apply the scheme and url_allowlist checks to every redirect hop."""
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                interpreter._validate_url(newurl, ln)
+                return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+        opener = urllib.request.build_opener(CheckedRedirectHandler)
         try:
-            with urllib.request.urlopen(req, timeout=self._http_timeout) as resp:
+            with opener.open(req, timeout=self._http_timeout) as resp:
                 raw = resp.read(self.MAX_HTTP_RESPONSE)
                 charset = resp.headers.get_content_charset() or "utf-8"
                 return {
@@ -207,11 +219,16 @@ class Interpreter:
             }
         except urllib.error.URLError as e:
             raise CharlotteError(f"*whimpers* Could not reach \"{url}\": {e.reason}", ln)
+        except CharlotteError:
+            raise  # e.g. a redirect to a blocked URL
         except Exception as e:
             raise CharlotteError(f"*whimpers* HTTP request failed: {e}", ln)
 
-    def run(self, source: str, source_path: str = None):
-        """Run a CharlotteLang program from source string, resetting all state first."""
+    def run(self, source: str, source_path: str = None) -> bool:
+        """Run a CharlotteLang program from source string, resetting all state first.
+
+        Returns False if the program stopped with an error, True otherwise.
+        """
         self.variables = {}
         self.functions = {}
         self._imported_files = set()
@@ -224,10 +241,13 @@ class Interpreter:
         self._server_shutdown = threading.Event()
         if source_path:
             self._source_dir = os.path.dirname(os.path.abspath(source_path))
-        self.execute(source)
+        return self.execute(source)
 
-    def execute(self, source: str):
-        """Execute CharlotteLang source without resetting state (used by REPL)."""
+    def execute(self, source: str) -> bool:
+        """Execute CharlotteLang source without resetting state (used by REPL).
+
+        Returns False if the program stopped with an error, True otherwise.
+        """
         lines = parse_lines(source)
         try:
             self._execute_block(lines)
@@ -239,8 +259,11 @@ class Interpreter:
             pass  # Top-level keep going is fine
         except CharlotteError as e:
             self.output_fn(str(e), "error")
+            return False
         except Exception as e:
             self.output_fn(f"🐾 Unexpected error: {e}", "error")
+            return False
+        return True
 
     # ── Block execution ──
 
@@ -254,13 +277,20 @@ class Interpreter:
         return block, i
 
     def _execute_block(self, lines: list[Line]):
-        """Execute a sequence of lines."""
+        """Execute a sequence of lines.
+
+        Returns the value of the last statement if it was a bare call such as
+        `double(4)`, `pets.pop()` or `dig_up(url)` (napping otherwise), so the
+        REPL can echo it.
+        """
         i = 0
+        last_value = None
         while i < len(lines):
             line = lines[i]
             text = line.text
             indent = line.indent
             ln = line.line_num
+            last_value = None
 
             # ── snag (import) ──
             if text.startswith("snag "):
@@ -493,23 +523,17 @@ class Interpreter:
                         raise CharlotteError(f"*confused sniff* Can only pop from a bunny (array), not {type(container).__name__}!", ln)
                     try:
                         if args_str.strip():
-                            container.pop(int(self._evaluate(args_str.strip(), ln)))
+                            last_value = container.pop(int(self._evaluate(args_str.strip(), ln)))
                         else:
-                            container.pop()
+                            last_value = container.pop()
                     except IndexError:
                         raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
                     i += 1
                     continue
 
-            # ── nap() as a standalone statement ──
-            if text.startswith("nap(") and text.endswith(")"):
-                self._evaluate(text, ln)
-                i += 1
-                continue
-
-            # ── mark_file() / append_file() as standalone statements ──
-            if (text.startswith("mark_file(") or text.startswith("append_file(")) and text.endswith(")"):
-                self._evaluate(text, ln)
+            # ── side-effect built-ins as standalone statements (nap, file writes, HTTP, beg) ──
+            if text.startswith(self._STATEMENT_BUILTINS) and text.endswith(")"):
+                last_value = self._evaluate(text, ln)
                 i += 1
                 continue
 
@@ -535,13 +559,14 @@ class Interpreter:
                 paren_pos = text.index("(")
                 fname = text[:paren_pos]
                 if fname in self.functions:
-                    self._call_function(fname, text[paren_pos + 1:-1], ln)
+                    last_value = self._call_function(fname, text[paren_pos + 1:-1], ln)
                     i += 1
                     continue
 
             raise CharlotteError(
                 f"*suspicious head tilt* Charlotte doesn't understand: \"{text}\"", ln
             )
+        return last_value
 
     # ── Statement handlers ──
 
@@ -642,8 +667,12 @@ class Interpreter:
         if not isinstance(arr, list):
             raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
+        # A bunny that keeps growing inside its own loop would zoom forever
+        max_laps = max(self.MAX_LOOPS, len(arr))
         try:
             for z, item in enumerate(arr):
+                if z >= max_laps:
+                    raise CharlotteError("Infinite zoomies! The bunny keeps growing — Charlotte collapsed.", ln)
                 self.variables["lap"] = z
                 self.variables["toy"] = item
                 try:
@@ -689,8 +718,12 @@ class Interpreter:
         if not isinstance(arr, list):
             raise CharlotteError("Can only zoom through a bunny (array) or collar (dict)!", ln)
         block, next_idx = self._get_block(lines, i + 1, indent)
+        # A bunny that keeps growing inside its own loop would zoom forever
+        max_laps = max(self.MAX_LOOPS, len(arr))
         try:
             for z, item in enumerate(arr):
+                if z >= max_laps:
+                    raise CharlotteError("Infinite zoomies! The bunny keeps growing — Charlotte collapsed.", ln)
                 self.variables["lap"] = z
                 self.variables[var_name] = item
                 try:
@@ -890,8 +923,11 @@ class Interpreter:
                 )
             kwargs = dict(zip(fn["params"], args))
 
-        saved = copy.deepcopy(self.variables)
-        self.variables.update(kwargs)
+        # Python-like scoping: the call gets its own variable table, so names
+        # fetched or reassigned inside stay local, while bunnies and collars
+        # are shared by reference — changes to them are visible to the caller.
+        saved = self.variables
+        self.variables = {**saved, **kwargs}
         result = None
         try:
             self._execute_block(fn["body"])
@@ -901,6 +937,10 @@ class Interpreter:
             raise CharlotteError("*confused head tilt* shake off (break) outside a loop!", ln)
         except CharlotteContinue:
             raise CharlotteError("*confused head tilt* keep going (continue) outside a loop!", ln)
+        except RecursionError:
+            raise CharlotteError(
+                f"*dizzy* Charlotte chased her tail too long! Too many nested calls in {name}().", ln
+            )
         finally:
             self.variables = saved
         return result
@@ -1002,6 +1042,43 @@ class Interpreter:
             i += 1
         return False
 
+    def _is_complete_fstring(self, expr: str) -> bool:
+        """Check if expr is a single complete f-string (not f"a" ~ f"b").
+
+        Quotes inside {...} belong to the embedded expression, so only a quote
+        outside the braces can close the f-string.
+        """
+        if len(expr) < 3 or expr[0] != "f" or expr[1] not in ('"', "'"):
+            return False
+        q = expr[1]
+        depth = 0
+        in_str = None
+        i = 2
+        while i < len(expr):
+            ch = expr[i]
+            if depth == 0:
+                if ch == "\\" or (ch == "{" and expr[i + 1:i + 2] == "{"):
+                    i += 2
+                    continue
+                if ch == "{":
+                    depth = 1
+                elif ch == q:
+                    return i == len(expr) - 1
+            elif in_str:
+                if ch == "\\":
+                    i += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+            elif ch in ('"', "'"):
+                in_str = ch
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            i += 1
+        return False
+
     def _count_preceding_backslashes(self, s: str, pos: int) -> int:
         """Count consecutive backslashes immediately before position pos."""
         count = 0
@@ -1082,8 +1159,8 @@ class Interpreter:
         if self._is_complete_string(expr):
             return self._process_escapes(expr[1:-1])
 
-        # f-strings: f"..." or f'...'
-        if (expr.startswith('f"') and expr.endswith('"')) or (expr.startswith("f'") and expr.endswith("'")):
+        # f-strings: f"..." or f'...' — must be a single complete f-string, not f"a" ~ f"b"
+        if self._is_complete_fstring(expr):
             inner = expr[2:-1]
             result = []
             i = 0
@@ -1213,56 +1290,170 @@ class Interpreter:
             pass
 
         # Parenthesized expression — only strip if the opening ( matches the closing )
+        # (parens inside string literals, like ("smile :)"), don't count)
         if expr.startswith("(") and expr.endswith(")"):
             depth = 0
+            in_str = False
+            str_ch = None
             matches_end = True
             for _i, _ch in enumerate(expr):
-                if _ch == "(":
-                    depth += 1
-                elif _ch == ")":
-                    depth -= 1
+                if not in_str and _ch in ('"', "'"):
+                    in_str = True
+                    str_ch = _ch
+                elif in_str and _ch == str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                    in_str = False
+                elif not in_str:
+                    if _ch == "(":
+                        depth += 1
+                    elif _ch == ")":
+                        depth -= 1
                 if depth == 0 and _i < len(expr) - 1:
                     matches_end = False
                     break
             if matches_end:
                 return self._evaluate(expr[1:-1], ln)
 
+        # ── Operators, lowest precedence first ──
+        # or → and → not → comparisons → ~ → + - → * / // % → unary - → ** → postfix
+        # (.toys, .keys, .values, .method(), [index]) → calls and names.
+        # Splitting on the loosest operator first means `"n: " ~ arr.toys` applies
+        # .toys to arr only, not to the whole concatenation.
+
+        # Logical OR / AND (or has lower precedence than and; scan left to right, respecting parens)
+        for op, handler in [(" or ", "or"), (" and ", "and")]:
+            idx = self._find_operator(expr, op)
+            if idx != -1:
+                left = self._evaluate(expr[:idx], ln)
+                if handler == "and":
+                    return self._evaluate(expr[idx + len(op):], ln) if self._is_truthy(left) else left
+                else:
+                    return left if self._is_truthy(left) else self._evaluate(expr[idx + len(op):], ln)
+
+        # Logical NOT — binds tighter than and/or, looser than comparisons
+        # (`not a and b` is `(not a) and b`; `not a == b` is `not (a == b)`)
+        if expr.startswith("not "):
+            return not self._is_truthy(self._evaluate(expr[4:], ln))
+
+        def _in_op(a, b):
+            if not isinstance(b, (list, dict, str)):
+                raise CharlotteError(f"*confused sniff* Cannot use 'in' on {type(b).__name__}!", ln)
+            return a in b if isinstance(b, (list, dict)) else str(a) in b
+
+        def _not_in_op(a, b):
+            if not isinstance(b, (list, dict, str)):
+                raise CharlotteError(f"*confused sniff* Cannot use 'not in' on {type(b).__name__}!", ln)
+            return a not in b if isinstance(b, (list, dict)) else str(a) not in b
+
+        # Comparisons — longer forms checked before shorter to avoid partial matches
+        comparisons = [
+            (" is bigger than ", lambda a, b: a > b),
+            (" is smaller than ", lambda a, b: a < b),
+            (" >= ", lambda a, b: a >= b),
+            (" <= ", lambda a, b: a <= b),
+            (" > ", lambda a, b: a > b),
+            (" < ", lambda a, b: a < b),
+            (" not equals ", lambda a, b: a != b),
+            (" equals ", lambda a, b: a == b),
+            (" != ", lambda a, b: a != b),
+            (" == ", lambda a, b: a == b),
+            (" not in ", _not_in_op),
+            (" in ", _in_op),
+        ]
+        for op_str, op_fn in comparisons:
+            idx = self._find_operator(expr, op_str)
+            if idx != -1:
+                left = self._evaluate(expr[:idx], ln)
+                right = self._evaluate(expr[idx + len(op_str):], ln)
+                return op_fn(left, right)
+
+        # String concatenation ~ (lower precedence than arithmetic, higher than comparisons)
+        idx = self._find_operator(expr, " ~ ")
+        if idx != -1:
+            parts = []
+            while idx != -1:
+                parts.append(expr[:idx])
+                expr = expr[idx + 3:]
+                idx = self._find_operator(expr, " ~ ")
+            parts.append(expr)
+            return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
+
+        # Arithmetic: + - (equal precedence, left-associative: scan for rightmost)
+        best_add_op = None
+        best_add_idx = -1
+        for op in (" + ", " - "):
+            idx = self._rfind_operator(expr, op)
+            if idx > best_add_idx:
+                best_add_idx = idx
+                best_add_op = op
+        if best_add_idx > 0:
+            left = self._evaluate(expr[:best_add_idx], ln)
+            right = self._evaluate(expr[best_add_idx + len(best_add_op):], ln)
+            if best_add_op == " + ":
+                if isinstance(left, str) or isinstance(right, str):
+                    return str(left) + str(right)
+                return left + right
+            return left - right
+
+        # Arithmetic: * / // % (equal precedence, left-associative: scan for rightmost)
+        best_mul_op = None
+        best_mul_idx = -1
+        for op in (" // ", " / ", " * ", " % "):
+            idx = self._rfind_operator(expr, op)
+            if idx > best_mul_idx:
+                best_mul_idx = idx
+                best_mul_op = op
+        if best_mul_idx > 0:
+            left = self._evaluate(expr[:best_mul_idx], ln)
+            right = self._evaluate(expr[best_mul_idx + len(best_mul_op):], ln)
+            if best_mul_op in (" / ", " // ", " % ") and right == 0:
+                raise CharlotteError("Can't divide by zero — stranger danger!", ln)
+            if best_mul_op == " // ":
+                return left // right
+            if best_mul_op == " * ":
+                if isinstance(left, str) and isinstance(right, int):
+                    return left * right
+                if isinstance(left, int) and isinstance(right, str):
+                    return right * left
+                return left * right
+            if best_mul_op == " % ":
+                return left % right
+            return left / right
+
+        # Unary minus: -expr  (e.g. -x, -(a + b), -myFunc(), -arr[0])
+        # Tighter than * / // %, looser than ** — so -2 ** 2 is -4, like Python.
+        if expr.startswith("-") and len(expr) > 1:
+            return -self._evaluate(expr[1:], ln)
+
+        # Arithmetic: ** (power) — highest arithmetic precedence, right-to-left
+        idx = self._find_operator(expr, " ** ")
+        if idx != -1:
+            left = self._evaluate(expr[:idx], ln)
+            right = self._evaluate(expr[idx + 4:], ln)
+            return left ** right
+
         # Indexing and slicing: expr[idx], expr[start:stop], expr[start:stop:step]
         # Supports chained access like arr[0][1] by finding the last top-level [...].
-        # We skip this block if there are top-level binary operators in the expression
-        # (e.g. arr[0] + arr[1]) — those are handled by the arithmetic handlers below.
+        # Binary operators were already split off above (e.g. arr[0] + arr[1]), so
+        # the trailing [...] belongs to the whole remaining expression.
         if "[" in expr and expr.endswith("]"):
-            # Skip if top-level binary operators are present (let arithmetic/comparison
-            # handlers split the expression first)
-            _has_top_level_op = False
-            for _test_op in (" + ", " - ", " * ", " / ", " // ", " ** ",
-                             " and ", " or ", " ~ ", " == ", " != ",
-                             " >= ", " <= ", " > ", " < ",
-                             " equals ", " not equals ",
-                             " is bigger than ", " is smaller than ",
-                             " in ", " not in "):
-                if self._find_operator(expr, _test_op) != -1:
-                    _has_top_level_op = True
-                    break
             # Find the last top-level [ whose matching ] is the final char.
             last_bracket_pos = -1
-            if not _has_top_level_op:
-                _depth = 0
-                _in_str = False
-                _str_ch = None
-                for _i, _ch in enumerate(expr):
-                    if not _in_str and _ch in ('"', "'"):
-                        _in_str = True
-                        _str_ch = _ch
-                    elif _in_str and _ch == _str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
-                        _in_str = False
-                    if not _in_str:
-                        if _ch == '[':
-                            if _depth == 0:
-                                last_bracket_pos = _i
-                            _depth += 1
-                        elif _ch == ']':
-                            _depth -= 1
+            _depth = 0
+            _in_str = False
+            _str_ch = None
+            for _i, _ch in enumerate(expr):
+                if not _in_str and _ch in ('"', "'"):
+                    _in_str = True
+                    _str_ch = _ch
+                elif _in_str and _ch == _str_ch and self._count_preceding_backslashes(expr, _i) % 2 == 0:
+                    _in_str = False
+                if not _in_str:
+                    if _ch == '[':
+                        if _depth == 0:
+                            last_bracket_pos = _i
+                        _depth += 1
+                    elif _ch == ']':
+                        _depth -= 1
             if last_bracket_pos > 0 and not (expr.startswith("bunny[") and last_bracket_pos == 5):
                 base_expr = expr[:last_bracket_pos]
                 key_expr = expr[last_bracket_pos + 1:-1]
@@ -1409,112 +1600,6 @@ class Interpreter:
                         return val.pop()
                     except IndexError:
                         raise CharlotteError("*paws at empty bunny* Can't pop from an empty list!", ln)
-
-        # Logical NOT
-        if expr.startswith("not "):
-            return not self._is_truthy(self._evaluate(expr[4:], ln))
-
-        # Logical OR / AND (or has lower precedence than and; scan left to right, respecting parens)
-        for op, handler in [(" or ", "or"), (" and ", "and")]:
-            idx = self._find_operator(expr, op)
-            if idx != -1:
-                left = self._evaluate(expr[:idx], ln)
-                if handler == "and":
-                    return self._evaluate(expr[idx + len(op):], ln) if self._is_truthy(left) else left
-                else:
-                    return left if self._is_truthy(left) else self._evaluate(expr[idx + len(op):], ln)
-
-        def _in_op(a, b):
-            if not isinstance(b, (list, dict, str)):
-                raise CharlotteError(f"*confused sniff* Cannot use 'in' on {type(b).__name__}!", ln)
-            return a in b if isinstance(b, (list, dict)) else str(a) in b
-
-        def _not_in_op(a, b):
-            if not isinstance(b, (list, dict, str)):
-                raise CharlotteError(f"*confused sniff* Cannot use 'not in' on {type(b).__name__}!", ln)
-            return a not in b if isinstance(b, (list, dict)) else str(a) not in b
-
-        # Comparisons — longer forms checked before shorter to avoid partial matches
-        comparisons = [
-            (" is bigger than ", lambda a, b: a > b),
-            (" is smaller than ", lambda a, b: a < b),
-            (" >= ", lambda a, b: a >= b),
-            (" <= ", lambda a, b: a <= b),
-            (" > ", lambda a, b: a > b),
-            (" < ", lambda a, b: a < b),
-            (" not equals ", lambda a, b: a != b),
-            (" equals ", lambda a, b: a == b),
-            (" != ", lambda a, b: a != b),
-            (" == ", lambda a, b: a == b),
-            (" not in ", _not_in_op),
-            (" in ", _in_op),
-        ]
-        for op_str, op_fn in comparisons:
-            idx = self._find_operator(expr, op_str)
-            if idx != -1:
-                left = self._evaluate(expr[:idx], ln)
-                right = self._evaluate(expr[idx + len(op_str):], ln)
-                return op_fn(left, right)
-
-        # String concatenation ~ (lower precedence than arithmetic, higher than comparisons)
-        idx = self._find_operator(expr, " ~ ")
-        if idx != -1:
-            parts = []
-            while idx != -1:
-                parts.append(expr[:idx])
-                expr = expr[idx + 3:]
-                idx = self._find_operator(expr, " ~ ")
-            parts.append(expr)
-            return "".join(str(self._evaluate(p.strip(), ln)) for p in parts)
-
-        # Arithmetic: + - (equal precedence, left-associative: scan for rightmost)
-        best_add_op = None
-        best_add_idx = -1
-        for op in (" + ", " - "):
-            idx = self._rfind_operator(expr, op)
-            if idx > best_add_idx:
-                best_add_idx = idx
-                best_add_op = op
-        if best_add_idx > 0:
-            left = self._evaluate(expr[:best_add_idx], ln)
-            right = self._evaluate(expr[best_add_idx + len(best_add_op):], ln)
-            if best_add_op == " + ":
-                if isinstance(left, str) or isinstance(right, str):
-                    return str(left) + str(right)
-                return left + right
-            return left - right
-
-        # Arithmetic: * / // % (equal precedence, left-associative: scan for rightmost)
-        best_mul_op = None
-        best_mul_idx = -1
-        for op in (" // ", " / ", " * ", " % "):
-            idx = self._rfind_operator(expr, op)
-            if idx > best_mul_idx:
-                best_mul_idx = idx
-                best_mul_op = op
-        if best_mul_idx > 0:
-            left = self._evaluate(expr[:best_mul_idx], ln)
-            right = self._evaluate(expr[best_mul_idx + len(best_mul_op):], ln)
-            if best_mul_op in (" / ", " // ") and right == 0:
-                raise CharlotteError("Can't divide by zero — stranger danger!", ln)
-            if best_mul_op == " // ":
-                return left // right
-            if best_mul_op == " * ":
-                if isinstance(left, str) and isinstance(right, int):
-                    return left * right
-                if isinstance(left, int) and isinstance(right, str):
-                    return right * left
-                return left * right
-            if best_mul_op == " % ":
-                return left % right
-            return left / right
-
-        # Arithmetic: ** (power) — highest arithmetic precedence, right-to-left
-        idx = self._find_operator(expr, " ** ")
-        if idx != -1:
-            left = self._evaluate(expr[:idx], ln)
-            right = self._evaluate(expr[idx + 4:], ln)
-            return left ** right
 
         # Built-in functions
         if expr.startswith("howBig(") and expr.endswith(")"):
@@ -1738,10 +1823,6 @@ class Interpreter:
             if fname in self.functions:
                 return self._call_function(fname, expr[paren_pos + 1:-1], ln)
 
-        # Unary minus: -expr  (e.g. -x, -(a + b), -myFunc())
-        if expr.startswith("-") and len(expr) > 1:
-            return -self._evaluate(expr[1:], ln)
-
         # Variable lookup
         if expr in self.variables:
             return self.variables[expr]
@@ -1803,9 +1884,13 @@ class Interpreter:
         if not block:
             raise CharlotteError("Guard block has no body! Indent the body.", ln)
 
-        # Convert path params like {id} to regex named groups
+        # Convert path params like {id} to regex named groups; everything else
+        # matches literally (so "/robots.txt" doesn't also match "/robotsXtxt")
         param_names = re.findall(r'\{(\w+)\}', path)
-        pattern_str = re.sub(r'\{(\w+)\}', r'(?P<\1>[^/]+)', path)
+        pattern_str = "".join(
+            f"(?P<{part[1:-1]}>[^/]+)" if re.fullmatch(r'\{\w+\}', part) else re.escape(part)
+            for part in re.split(r'(\{\w+\})', path)
+        )
         pattern = re.compile(f'^{pattern_str}$')
 
         self._routes.append({
@@ -1880,6 +1965,8 @@ class Interpreter:
 
                     with interpreter._handler_lock:
                         existing_keys = set(interpreter.variables.keys())
+                        # `request` shadows a global of the same name only while the handler runs
+                        saved_request = interpreter.variables.get("request")
                         interpreter.variables["request"] = request_collar
                         response = None
                         try:
@@ -1907,7 +1994,8 @@ class Interpreter:
                             )
                             return
                         finally:
-                            interpreter.variables.pop("request", None)
+                            if "request" in existing_keys:
+                                interpreter.variables["request"] = saved_request
                             for k in list(interpreter.variables.keys()):
                                 if k not in existing_keys:
                                     interpreter.variables.pop(k, None)
@@ -1973,10 +2061,16 @@ class Interpreter:
             def do_PATCH(self):
                 self.do_request()
 
-            def log_message(self, format, *args):
+            def log_request(self, code="-", size="-"):
+                code = getattr(code, "value", code)  # HTTPStatus → int
                 interpreter.output_fn(
-                    f"🐕 {args[0]} {args[1]} {args[2]}", "bark"
+                    f"🐕 {self.requestline} {code} {size}", "bark"
                 )
+
+            def log_message(self, format, *args):
+                # Only errors reach here (e.g. 501 for OPTIONS/HEAD, 400 for a
+                # malformed request), and their args vary in shape and count.
+                interpreter.output_fn(f"🐕 {format % args}", "howl")
 
         self._server = http.server.HTTPServer(("", port), CharlotteHandler)
         self._server_thread = threading.Thread(
@@ -2000,7 +2094,7 @@ class Interpreter:
 
 def run_repl():
     """Interactive CharlotteLang REPL."""
-    print("🐕 CharlotteLang v4.5 REPL")
+    print("🐕 CharlotteLang v4.6 REPL")
     print("   Type Charlotte code below. Commands:")
     print("   .run      — execute the buffer")
     print("   .clear    — clear the buffer")
@@ -2066,7 +2160,10 @@ def run_repl():
                 not buffer[-1].startswith(" ") and
                 len(buffer) == 1):
                 try:
-                    interp._execute_block(parse_lines(stripped))
+                    # Bare calls like `double(4)` echo their result; napping stays silent
+                    val = interp._execute_block(parse_lines(stripped))
+                    if val is not None:
+                        interp.output_fn(str(val), "bark")
                 except CharlotteError as ce:
                     if "Charlotte doesn't understand" in str(ce):
                         try:
@@ -2089,7 +2186,8 @@ def run_repl():
 
 def print_quick_ref():
     """Print the CharlotteLang quick reference."""
-    print("""
+    # Raw string so the card shows escape sequences like \n literally
+    print(r"""
 ┌──────────────────────────────────────────────────────────┐
 │  🐕 CharlotteLang Quick Reference                        │
 ├──────────────────────────────────────────────────────────┤
@@ -2098,6 +2196,7 @@ def print_quick_ref():
 │  howl "oops"             → print to stderr               │
 │  fetch x = 10            → create variable               │
 │  x = 20                  → reassign variable             │
+│  fetch a, b = arr        → unpack a bunny into names     │
 │  growl "error!"          → throw error                   │
 │                                                          │
 │  sniff x is bigger than 5:                               │
@@ -2121,6 +2220,7 @@ def print_quick_ref():
 │  teach trick greet(who):                                 │
 │    bark f"hi {who}"                                      │
 │    rollover "done"       → return                        │
+│  greet(who: "Rex")       → call with a named argument    │
 │                                                          │
 │  shake off               → break                         │
 │  keep going              → continue                      │
@@ -2147,13 +2247,18 @@ def print_quick_ref():
 │  str.trim()              → strip whitespace              │
 │  str.upper() / .lower()  → case conversion               │
 │  "hello\nworld"          → escape sequences (\n\t\\\")   │
+│  f"hi {x}" / f'hi {x}'   → f-string (either quotes)      │
 │  loyal / stranger        → true / false                  │
 │  napping                 → null/None                     │
 │  breed(x)                → type name                     │
+│  howBig(x)               → length of bunny/string/collar │
 │  goodBoy(x)              → convert to int                │
+│  treat(x)                → convert to float              │
+│  yap(x)                  → convert to string             │
 │  loyal(x)                → convert to bool               │
 │  abs(x)                  → absolute value                │
-│  round(x) / round(x, n)  → round a number               │
+│  floor(x) / ceil(x)      → round down / round up         │
+│  round(x) / round(x, n)  → round a number                │
 │  min(a, b) / min(list)   → minimum value                 │
 │  max(a, b) / max(list)   → maximum value                 │
 │  beg("prompt")           → read user input (string)      │
@@ -2170,6 +2275,14 @@ def print_quick_ref():
 │  bury(url, data, headers)→ POST with custom headers      │
 │  chew_json(string)       → parse JSON → collar/bunny     │
 │  yap_json(value)         → serialize to JSON string      │
+│                                                          │
+│  sniff_file("a.txt")     → read file (napping if none)   │
+│  mark_file("a.txt", s)   → write file (overwrite)        │
+│  append_file("a.txt", s) → append to file                │
+│                                                          │
+│  nose_for(text, pat)     → first regex match or napping  │
+│  nose_for_all(text, pat) → all regex matches (bunny)     │
+│  nose_swap(text, pat, r) → regex replace                 │
 │                                                          │
 │  woof this is a comment  → comment (always)              │
 │  sniff this is ignored   → comment (only without colon)  │
@@ -2201,7 +2314,7 @@ def print_quick_ref():
 
 def main():
     if len(sys.argv) < 2:
-        print("🐕 CharlotteLang v4.5")
+        print("🐕 CharlotteLang v4.6")
         print()
         print("Usage:")
         print("  charlotte run <file.bark>   Run a .bark file")
@@ -2227,7 +2340,8 @@ def main():
         with open(filepath, "r") as f:
             source = f.read()
         interp = Interpreter()
-        interp.run(source, source_path=filepath)
+        if not interp.run(source, source_path=filepath):
+            sys.exit(1)
 
         # If a kennel (server) is running, block until Ctrl+C
         if interp._server:

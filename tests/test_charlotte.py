@@ -1581,12 +1581,13 @@ class TestReplStatePreservation:
         assert outputs == ["2"]
 
 
-# ─── Fix: function scope isolation (deep copy prevents mutation leak) ──
+# ─── Function scoping: locals stay local, bunnies/collars are shared ──
 
 class TestFunctionScopeIsolation:
-    """Mutations to lists inside functions must not affect the caller's copy."""
+    """Names assigned inside a function stay local; bunnies and collars are
+    shared by reference, so mutations are visible to the caller (like Python)."""
 
-    def test_list_mutation_inside_function_does_not_leak(self):
+    def test_list_mutation_inside_function_is_visible_to_caller(self):
         src = (
             'fetch arr = bunny[1, 2, 3]\n'
             'teach trick mutate(a):\n'
@@ -1594,8 +1595,8 @@ class TestFunctionScopeIsolation:
             'mutate(arr)\n'
             'bark arr.toys'
         )
-        # arr should still have 3 items after calling mutate()
-        assert only(src) == "3"
+        # a and arr are the same bunny, so arr now has 4 items
+        assert only(src) == "4"
 
     def test_scalar_assignment_inside_function_does_not_leak(self):
         src = (
@@ -1624,7 +1625,7 @@ class TestFunctionScopeIsolation:
         assert "caught" in out
         assert out[-1] == "42"
 
-    def test_nested_list_in_global_scope_not_modified(self):
+    def test_list_argument_is_shared_with_caller(self):
         src = (
             'fetch data = bunny[1, 2, 3]\n'
             'teach trick peek(lst):\n'
@@ -1634,8 +1635,8 @@ class TestFunctionScopeIsolation:
             'bark data.toys'
         )
         out = run(src)
-        # Inside the function, lst has 4 items; outside, data still has 3
-        assert out == ["4", "3"]
+        # lst and data are the same bunny, inside and outside the function
+        assert out == ["4", "4"]
 
 
 # ─── Fix: > and < comparison operators ──────────────────────
@@ -2044,18 +2045,18 @@ def _mock_response(body="", status=200, headers=None):
 class TestHTTPDigUp:
     """Tests for dig_up() (HTTP GET) built-in."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_basic_get(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
         result = run('fetch resp = dig_up("https://example.com/api")\nbark resp["status"]')
         assert result == ["200"]
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_body(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("hello world", 200)
         assert only('fetch resp = dig_up("https://example.com")\nbark resp["body"]') == "hello world"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_with_headers(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
         src = 'fetch h = collar{"Authorization": "Bearer abc"}\nfetch resp = dig_up("https://example.com/api", h)\nbark resp["status"]'
@@ -2064,7 +2065,7 @@ class TestHTTPDigUp:
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("Authorization") == "Bearer abc"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_parse_json_response(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"name": "Charlotte", "age": 5}', 200)
         src = 'fetch resp = dig_up("https://example.com/api")\nfetch data = chew_json(resp["body"])\nbark data["name"]'
@@ -2084,7 +2085,7 @@ class TestHTTPDigUp:
         errors = run_errors('bark dig_up("ftp://example.com/file")')
         assert len(errors) == 1
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_error_response(self, mock_urlopen):
         err = urllib.error.HTTPError(
             "https://example.com/missing", 404, "Not Found", {}, io.BytesIO(b"not found")
@@ -2093,7 +2094,7 @@ class TestHTTPDigUp:
         result = only('fetch resp = dig_up("https://example.com/missing")\nbark resp["status"]')
         assert result == "404"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_get_connection_error(self, mock_urlopen):
         mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         errors = run_errors('fetch resp = dig_up("https://example.com")')
@@ -2104,13 +2105,13 @@ class TestHTTPDigUp:
 class TestHTTPBury:
     """Tests for bury() (HTTP POST) built-in."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_basic_post(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"id": 1}', 201)
         src = 'fetch body = yap_json(collar{"name": "Charlotte"})\nfetch resp = bury("https://example.com/api", body)\nbark resp["status"]'
         assert only(src) == "201"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_post_sends_data(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response('{"ok": true}', 200)
         src = 'fetch body = yap_json(collar{"key": "val"})\nfetch resp = bury("https://example.com/api", body)'
@@ -2119,7 +2120,7 @@ class TestHTTPBury:
         assert req.method == "POST"
         assert b'"key"' in req.data
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_post_with_custom_headers(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("ok", 200)
         src = ('fetch h = collar{"X-Custom": "test123"}\n'
@@ -2129,7 +2130,7 @@ class TestHTTPBury:
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("X-custom") == "test123"
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_post_default_content_type(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("ok", 200)
         run('fetch resp = bury("https://example.com/api", "test")')
@@ -2145,7 +2146,7 @@ class TestHTTPBury:
 class TestHTTPUrlAllowlist:
     """Tests for url_allowlist security restriction."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_allowed_host(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response("ok", 200)
         outputs = []
@@ -2176,7 +2177,7 @@ class TestHTTPUrlAllowlist:
 class TestHTTPWithCareful:
     """Tests for HTTP functions used with careful/oops error handling."""
 
-    @patch("charlotte.urllib.request.urlopen")
+    @patch("charlotte.urllib.request.OpenerDirector.open")
     def test_catch_connection_error(self, mock_urlopen):
         mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
         src = ('careful:\n'
@@ -2974,3 +2975,534 @@ class TestBugFixes:
         interp.run("kennel 38391\nleave_kennel\n")
         assert interp._server_shutdown.is_set()
 
+
+
+# ─── Operator Precedence (postfix, not, unary minus) ────────
+
+class TestPostfixPrecedence:
+    """.toys / .method() / [index] bind to their operand, not the whole expression."""
+
+    def test_concat_with_method_call(self):
+        assert only('fetch name = "charlotte"\nbark "Hi " ~ name.upper()') == "Hi CHARLOTTE"
+
+    def test_concat_with_toys(self):
+        assert only('fetch s = "hello"\nbark "len: " ~ s.toys') == "len: 5"
+
+    def test_plus_with_method_call(self):
+        assert only('fetch s = "b"\nbark "a" + s.upper()') == "aB"
+
+    def test_comparison_with_toys_in_while(self):
+        src = (
+            'fetch arr = bunny[1, 2, 3]\n'
+            'fetch i = 0\n'
+            'zoomies while i < arr.toys:\n'
+            '  i = i + 1\n'
+            'bark i\n'
+        )
+        assert only(src) == "3"
+
+    def test_arithmetic_with_toys(self):
+        assert only('fetch arr = bunny[1, 2, 3]\nbark 1 + arr.toys') == "4"
+        assert only('fetch arr = bunny[1, 2, 3]\nbark 2 ** arr.toys') == "8"
+
+    def test_and_with_toys(self):
+        """The bounds check from examples/server.bark."""
+        src = (
+            'fetch dogs = bunny["a", "b"]\n'
+            'fetch i = 1\n'
+            'sniff i >= 0 and i < dogs.toys:\n'
+            '  bark "ok"\n'
+        )
+        assert only(src) == "ok"
+
+    def test_modulo_of_indexed_values(self):
+        assert only('fetch arr = bunny[7, 4]\nbark arr[0] % arr[1]') == "3"
+
+    def test_negate_indexed_value(self):
+        assert only('fetch arr = bunny[7, 4]\nbark -arr[0]') == "-7"
+        assert only('fetch arr = bunny[7, 4]\nbark -arr[0] + 1') == "-6"
+
+    def test_negate_toys(self):
+        assert only('fetch arr = bunny[7, 4]\nbark -arr.toys') == "-2"
+
+    def test_unary_minus_binds_looser_than_power(self):
+        assert only('bark -2 ** 2') == "-4"
+        assert only('bark 2 ** -1') == "0.5"
+
+    def test_not_binds_tighter_than_and_or(self):
+        assert only('bark not stranger and stranger') == "False"
+        assert only('bark not loyal or loyal') == "True"
+
+    def test_not_with_toys(self):
+        assert only('fetch e = bunny[]\nbark not e.toys') == "True"
+
+    def test_not_still_looser_than_comparison(self):
+        assert only('bark not loyal == stranger') == "True"
+
+
+class TestExpressionParsingFixes:
+    """f-strings next to operators, % by zero, and parens inside strings."""
+
+    def test_fstring_concat(self):
+        assert only('fetch a = 1\nfetch b = 2\nbark f"{a}" ~ "-" ~ f"{b}"') == "1-2"
+
+    def test_fstring_comparison(self):
+        assert only('fetch a = 1\nbark f"{a}" == "1"') == "True"
+
+    def test_fstring_with_same_quotes_inside_braces(self):
+        assert only('fetch d = collar{"k": "v"}\nbark f"{d["k"]}"') == "v"
+
+    def test_fstring_method_call(self):
+        assert only('fetch n = "rex"\nbark f"{n}!".upper()') == "REX!"
+
+    def test_modulo_by_zero_is_charlotte_error(self):
+        errors = run_errors('bark 5 % 0')
+        assert len(errors) == 1
+        assert "divide by zero" in errors[0]
+
+    def test_parens_around_string_containing_paren(self):
+        assert only('bark ("smile :)")') == "smile :)"
+        assert only('bark ("a" ~ ")")') == "a)"
+
+
+# ─── Function Calls: Reference Semantics ────────────────────
+
+class TestFunctionReferenceSemantics:
+    """Calling a function must not swap out the caller's variables, so a write
+    whose value comes from a function call lands in the caller's container."""
+
+    FN = 'teach trick double(n):\n  rollover n * 2\n'
+
+    def test_give_function_result(self):
+        assert only(self.FN + 'fetch results = bunny[]\nresults.give(double(5))\nbark results') == "[10]"
+
+    def test_dict_assign_function_result(self):
+        assert only(self.FN + 'fetch d = collar{}\nd["x"] = double(5)\nbark d["x"]') == "10"
+
+    def test_list_assign_function_result(self):
+        assert only(self.FN + 'fetch a = bunny[0]\na[0] = double(5)\nbark a[0]') == "10"
+
+    def test_bury_function_result(self):
+        assert only(self.FN + 'fetch d = collar{}\nd.bury("x", double(5))\nbark d["x"]') == "10"
+
+    def test_give_function_result_in_loop(self):
+        src = self.FN + (
+            'fetch results = bunny[]\n'
+            'zoomies through bunny[1, 2, 3]:\n'
+            '  results.give(double(toy))\n'
+            'bark results\n'
+        )
+        assert only(src) == "[2, 4, 6]"
+
+    def test_mutating_returned_item_updates_original(self):
+        """The find-then-update pattern from apps/pet_shelter_api.bark."""
+        src = (
+            'fetch dogs = bunny[collar{"id": 1, "age": 5}]\n'
+            'teach trick find_dog(id):\n'
+            '  zoomies dog through dogs:\n'
+            '    sniff dog["id"] == id:\n'
+            '      rollover dog\n'
+            'fetch dog = find_dog(1)\n'
+            'dog["age"] = 6\n'
+            'bark dogs[0]["age"]\n'
+        )
+        assert only(src) == "6"
+
+    def test_fetch_inside_function_stays_local(self):
+        errors = run_errors('teach trick make():\n  fetch secret = 1\nmake()\nbark secret\n')
+        assert len(errors) == 1
+        assert "secret" in errors[0]
+
+    def test_reassigning_parameter_does_not_rebind_caller_variable(self):
+        src = (
+            'fetch arr = bunny[1]\n'
+            'teach trick replace(a):\n'
+            '  a = bunny[9, 9]\n'
+            'replace(arr)\n'
+            'bark arr\n'
+        )
+        assert only(src) == "[1]"
+
+    def test_recursion_still_works(self):
+        src = (
+            'teach trick fact(n):\n'
+            '  sniff n <= 1:\n'
+            '    rollover 1\n'
+            '  rollover n * fact(n - 1)\n'
+            'bark fact(10)\n'
+        )
+        assert only(src) == "3628800"
+
+
+class TestPetShelterApp:
+    """apps/pet_shelter_api.bark: updates made through find_dog() must persist."""
+
+    def test_put_and_adopt_persist(self):
+        import socket
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "apps", "pet_shelter_api.bark")
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        assert "kennel 3000" in source
+        with socket.socket() as s:
+            s.bind(("", 0))
+            port = s.getsockname()[1]
+        interp = Interpreter(output_fn=lambda text, kind="bark": None)
+        interp.run(source.replace("kennel 3000", f"kennel {port}"), source_path=path)
+        time.sleep(0.2)
+        base = f"http://localhost:{port}"
+        try:
+            put = urllib.request.Request(f"{base}/dogs/1", data=b'{"age": 6}', method="PUT")
+            urllib.request.urlopen(put).read()
+            with urllib.request.urlopen(f"{base}/dogs/1") as resp:
+                assert json.loads(resp.read())["age"] == 6
+
+            adopt = urllib.request.Request(f"{base}/dogs/2/adopt", data=b"{}", method="POST")
+            urllib.request.urlopen(adopt).read()
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(adopt)
+            assert exc.value.code == 409
+        finally:
+            interp._server.shutdown()
+
+
+# ─── CLI Error Reporting ────────────────────────────────────
+
+class TestCliErrors:
+    """`charlotte run` reports uncaught errors on stderr and exits with status 1."""
+
+    def _run_cli(self, source):
+        import subprocess
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "prog.bark")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(source)
+            return subprocess.run(
+                [sys.executable, os.path.join(root, "charlotte.py"), "run", path],
+                capture_output=True, encoding="utf-8", timeout=60,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            )
+
+    def test_error_goes_to_stderr_with_exit_1(self):
+        result = self._run_cli('bark "before"\nbark 1 / 0\nbark "after"\n')
+        assert result.returncode == 1
+        assert result.stdout.strip() == "before"
+        assert "divide by zero" in result.stderr
+
+    def test_clean_program_exits_0(self):
+        result = self._run_cli('bark "hi"\n')
+        assert result.returncode == 0
+        assert result.stdout.strip() == "hi"
+        assert result.stderr == ""
+
+    def test_caught_error_exits_0(self):
+        result = self._run_cli('careful:\n  growl "oops"\noops e:\n  bark "caught"\n')
+        assert result.returncode == 0
+        assert result.stdout.strip() == "caught"
+
+    def test_run_and_execute_report_success(self):
+        interp = Interpreter(output_fn=lambda text, kind="bark": None)
+        assert interp.run('bark "ok"') is True
+        assert interp.run('bark 1 / 0') is False
+        assert interp.execute('bark "ok"') is True
+
+
+# ─── HTTP Server Robustness ─────────────────────────────────
+
+class TestHTTPServerFixes:
+    """Unsupported methods, the `request` variable, and literal route paths."""
+
+    def _start(self, source):
+        import socket
+        with socket.socket() as s:
+            s.bind(("", 0))
+            port = s.getsockname()[1]
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append((kind, text)))
+        interp.run(source + f"\nkennel {port}")
+        time.sleep(0.2)
+        return interp, port, outputs
+
+    def test_unsupported_method_gets_501_response(self):
+        import http.client
+        interp, port, outputs = self._start(
+            'guard GET "/ping":\n  rollover collar{"status": 200, "body": "pong"}'
+        )
+        try:
+            for method in ("OPTIONS", "HEAD"):
+                conn = http.client.HTTPConnection("localhost", port, timeout=5)
+                conn.request(method, "/ping")
+                assert conn.getresponse().status == 501
+                conn.close()
+            # The server keeps serving afterwards
+            with urllib.request.urlopen(f"http://localhost:{port}/ping") as resp:
+                assert resp.read() == b"pong"
+            assert any(kind == "howl" and "501" in text for kind, text in outputs)
+        finally:
+            interp._server.shutdown()
+
+    def test_global_named_request_survives_handler(self):
+        interp, port, _ = self._start(
+            'fetch request = "my global"\n'
+            'guard GET "/echo":\n'
+            '  rollover collar{"status": 200, "body": request["path"]}'
+        )
+        try:
+            with urllib.request.urlopen(f"http://localhost:{port}/echo") as resp:
+                assert resp.read() == b"/echo"
+            assert interp.variables["request"] == "my global"
+        finally:
+            interp._server.shutdown()
+
+    def test_request_variable_removed_after_handler(self):
+        interp, port, _ = self._start(
+            'guard GET "/x":\n  rollover collar{"status": 200, "body": "ok"}'
+        )
+        try:
+            urllib.request.urlopen(f"http://localhost:{port}/x").read()
+            assert "request" not in interp.variables
+        finally:
+            interp._server.shutdown()
+
+    def test_route_path_is_matched_literally(self):
+        interp, port, _ = self._start(
+            'guard GET "/robots.txt":\n'
+            '  rollover collar{"status": 200, "body": "robots"}\n'
+            'guard GET "/v1.0/(beta)/{id}":\n'
+            '  rollover collar{"status": 200, "body": request["path_params"]["id"]}'
+        )
+        try:
+            with urllib.request.urlopen(f"http://localhost:{port}/robots.txt") as resp:
+                assert resp.read() == b"robots"
+            with pytest.raises(urllib.error.HTTPError) as exc:
+                urllib.request.urlopen(f"http://localhost:{port}/robotsXtxt")
+            assert exc.value.code == 404
+            with urllib.request.urlopen(f"http://localhost:{port}/v1.0/(beta)/7") as resp:
+                assert resp.read() == b"7"
+        finally:
+            interp._server.shutdown()
+
+
+# ─── HTTP Client Redirect Checks ────────────────────────────
+
+class TestHTTPRedirectChecks:
+    """Every redirect hop must pass the same scheme and url_allowlist checks."""
+
+    def _redirect_server(self):
+        import http.server
+
+        class Redirector(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                port = self.server.server_port
+                targets = {
+                    "/to-ip": f"http://127.0.0.1:{port}/final",
+                    "/to-localhost": f"http://localhost:{port}/final",
+                    "/to-ftp": "ftp://localhost/file",
+                }
+                if self.path in targets:
+                    self.send_response(302)
+                    self.send_header("Location", targets[self.path])
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"reached " + self.path.encode())
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Redirector)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def _run(self, source, **kwargs):
+        outputs = []
+        interp = Interpreter(output_fn=lambda text, kind="bark": outputs.append((kind, text)), **kwargs)
+        interp.run(source)
+        return outputs
+
+    def test_redirect_to_host_not_on_allowlist_is_blocked(self):
+        server = self._redirect_server()
+        try:
+            out = self._run(
+                f'bark dig_up("http://localhost:{server.server_port}/to-ip")["body"]',
+                url_allowlist={"localhost"},
+            )
+            assert len(out) == 1 and out[0][0] == "error"
+            assert "127.0.0.1" in out[0][1] and "not on the allowed list" in out[0][1]
+        finally:
+            server.shutdown()
+
+    def test_redirect_to_allowed_host_is_followed(self):
+        server = self._redirect_server()
+        try:
+            out = self._run(
+                f'bark dig_up("http://127.0.0.1:{server.server_port}/to-localhost")["body"]',
+                url_allowlist={"localhost", "127.0.0.1"},
+            )
+            assert out == [("bark", "reached /final")]
+        finally:
+            server.shutdown()
+
+    def test_redirect_to_non_http_scheme_is_blocked(self):
+        server = self._redirect_server()
+        try:
+            out = self._run(f'bark dig_up("http://127.0.0.1:{server.server_port}/to-ftp")["body"]')
+            assert len(out) == 1 and out[0][0] == "error"
+            assert "Only http:// and https://" in out[0][1]
+        finally:
+            server.shutdown()
+
+
+# ─── Loop and Recursion Guards ──────────────────────────────
+
+class TestLoopAndRecursionGuards:
+    """Runaway foreach loops and runaway recursion end with a Charlotte error."""
+
+    def test_foreach_over_growing_list_is_capped(self):
+        errors = run_errors('fetch xs = bunny[1]\nzoomies through xs:\n  xs.give(1)\n')
+        assert len(errors) == 1
+        assert "Infinite zoomies" in errors[0]
+
+    def test_named_foreach_over_growing_list_is_capped(self):
+        errors = run_errors('fetch xs = bunny[1]\nzoomies x through xs:\n  xs.give(x)\n')
+        assert len(errors) == 1
+        assert "Infinite zoomies" in errors[0]
+
+    def test_foreach_list_may_grow_like_a_work_queue(self):
+        src = (
+            'fetch queue = bunny[3]\n'
+            'fetch seen = bunny[]\n'
+            'zoomies through queue:\n'
+            '  seen.give(toy)\n'
+            '  sniff toy > 0:\n'
+            '    queue.give(toy - 1)\n'
+            'bark seen\n'
+        )
+        assert only(src) == "[3, 2, 1, 0]"
+
+    def test_foreach_over_list_longer_than_cap_still_allowed(self):
+        src = (
+            'fetch xs = bunny[]\n'
+            'zoomies 10000 times:\n'
+            '  xs.give(lap)\n'
+            'xs.give(10000)\n'
+            'fetch total = 0\n'
+            'zoomies through xs:\n'
+            '  total = total + 1\n'
+            'bark total\n'
+        )
+        assert only(src) == "10001"
+
+    def test_runaway_recursion_gives_friendly_error(self):
+        errors = run_errors('teach trick forever(n):\n  rollover forever(n + 1)\nforever(0)\n')
+        assert len(errors) == 1
+        assert "chased her tail" in errors[0]
+        assert "forever()" in errors[0]
+
+    def test_runaway_recursion_can_be_caught(self):
+        src = (
+            'teach trick forever(n):\n'
+            '  rollover forever(n + 1)\n'
+            'careful:\n'
+            '  forever(0)\n'
+            'oops e:\n'
+            '  bark "caught"\n'
+            'bark "still running"\n'
+        )
+        assert run(src) == ["caught", "still running"]
+
+
+# ─── Side-effect Built-ins as Statements ────────────────────
+
+class TestStatementBuiltins:
+    """dig_up, bury, and beg can stand alone on a line, like nap and mark_file."""
+
+    @patch("charlotte.urllib.request.OpenerDirector.open")
+    def test_bury_as_statement(self, mock_open):
+        mock_open.return_value = _mock_response('{"ok": true}', 201)
+        assert run('bury("https://example.com/api", collar{"a": 1})\nbark "sent"') == ["sent"]
+        assert mock_open.called
+
+    @patch("charlotte.urllib.request.OpenerDirector.open")
+    def test_dig_up_as_statement(self, mock_open):
+        mock_open.return_value = _mock_response("pong", 200)
+        assert run('dig_up("https://example.com/ping")\nbark "pinged"') == ["pinged"]
+        assert mock_open.called
+
+    def test_beg_as_statement(self, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "")
+        assert run('beg("Press enter to continue")\nbark "continued"') == ["continued"]
+
+    def test_unknown_call_still_not_understood(self):
+        errors = run_errors('mystery(1)')
+        assert len(errors) == 1
+        assert "doesn't understand" in errors[0]
+
+
+# ─── REPL: Bare Calls Echo Their Result ─────────────────────
+
+class TestReplEchoesCallResults:
+    """At the REPL prompt, a bare call echoes its result unless it is napping."""
+
+    DOUBLE = ("teach trick double(n):", "  rollover n * 2", ".run")
+
+    def _repl(self, monkeypatch, capsys, *lines):
+        from charlotte import run_repl
+        feed = iter(list(lines) + [".exit"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(feed))
+        run_repl()
+        out = capsys.readouterr().out.splitlines()
+        start = out.index("") + 1  # the banner ends with a blank line
+        return out[start:-1]       # the last line is the goodbye
+
+    def test_function_call_echoes_result(self, monkeypatch, capsys):
+        assert self._repl(monkeypatch, capsys, *self.DOUBLE, "double(4)") == ["8"]
+
+    def test_napping_result_stays_silent(self, monkeypatch, capsys):
+        lines = ("teach trick quiet():", "  fetch x = 1", ".run", "quiet()")
+        assert self._repl(monkeypatch, capsys, *lines) == []
+
+    def test_pop_echoes_popped_value(self, monkeypatch, capsys):
+        out = self._repl(monkeypatch, capsys, 'fetch pets = bunny["rex", "fido"]', "pets.pop()", "pets.toys")
+        assert out == ["fido", "1"]
+
+    def test_bark_of_call_prints_once(self, monkeypatch, capsys):
+        assert self._repl(monkeypatch, capsys, *self.DOUBLE, "bark double(5)") == ["10"]
+
+    def test_function_output_comes_before_result(self, monkeypatch, capsys):
+        lines = ('teach trick greet(who):', '  bark f"hi {who}"', '  rollover who', '.run', 'greet("rex")')
+        assert self._repl(monkeypatch, capsys, *lines) == ["hi rex", "rex"]
+
+
+# ─── Quick Reference Card (.help / charlotte help) ──────────
+
+class TestQuickReferenceCard:
+    """The quick reference lists current built-ins and renders as a clean box."""
+
+    def _card(self, capsys):
+        from charlotte import print_quick_ref
+        print_quick_ref()
+        return [line for line in capsys.readouterr().out.splitlines() if line]
+
+    def test_lists_newer_features(self, capsys):
+        card = "\n".join(self._card(capsys))
+        for entry in ("fetch a, b = arr", 'greet(who: "Rex")', "f'hi {x}'",
+                      "howBig(x)", "treat(x)", "yap(x)", "floor(x) / ceil(x)",
+                      "sniff_file(", "mark_file(", "append_file(",
+                      "nose_for(", "nose_for_all(", "nose_swap("):
+            assert entry in card, entry
+
+    def test_escape_sequences_shown_literally(self, capsys):
+        assert any(r'"hello\nworld"' in line for line in self._card(capsys))
+
+    def test_every_row_has_the_same_width(self, capsys):
+        import unicodedata
+
+        def width(s):
+            return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+        card = self._card(capsys)
+        assert card[0].startswith("┌") and card[-1].startswith("└")
+        assert {width(line) for line in card} == {width(card[0])}

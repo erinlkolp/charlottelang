@@ -1,4 +1,4 @@
-# 🐕 CharlotteLang v4.5
+# 🐕 CharlotteLang v4.6
 
 **A Pythonic programming language with chihuahua soul and pitbull energy.**
 
@@ -43,6 +43,8 @@ Run it:
 ```bash
 charlotte run hello.bark
 ```
+
+If the program stops with an uncaught error, Charlotte prints it to stderr and `charlotte run` exits with status 1, so scripts and CI can tell it failed.
 
 ## Language Reference
 
@@ -124,6 +126,18 @@ charlotte run hello.bark
 | `greet(who: "Rex")` | `greet(who="Rex")` | Named argument — pass by parameter name |
 | `greet("Rex", greeting: "Woof")` | `greet("Rex", greeting="Woof")` | Mix positional and named arguments |
 
+Inside a trick, names you `fetch` or reassign are local to that call. Bunnies and collars are passed by reference, as in Python, so changing one you were handed (with `.give()`, `.bury()`, or `x[key] = value`) changes it for the caller too:
+
+```
+teach trick add_toy(toys, name):
+  toys.give(name)
+
+fetch box = bunny["ball"]
+add_toy(box, "squeaky duck")
+bark box
+woof prints ['ball', 'squeaky duck']
+```
+
 ### Error Handling
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
@@ -165,6 +179,8 @@ snag "helpers.bark"
 | `+ - * / // % **` | `+ - * / // % **` | Arithmetic (`**` = power/exponent) |
 | `-x` | `-x` | Unary minus — negate any variable or expression |
 | `"ha" * 3` | `"ha" * 3` | String repetition → `"hahaha"` |
+
+Operators bind like Python's. From loosest to tightest: `or`, `and`, `not`, comparisons (`==`, `<`, `equals`, `in`, …), `~`, `+ -`, `* / // %`, unary `-`, `**`, and finally `.toys`, `.method()`, and `[index]`. So `"count: " ~ arr.toys` joins the length of `arr`, and `not a and b` means `(not a) and b`. Use parentheses when in doubt.
 
 ### Built-in Functions
 | Charlotte | Python | Description |
@@ -226,6 +242,8 @@ oops e:
   bark f"Request failed: {e}"
 ```
 
+`dig_up(...)` and `bury(...)` can also stand alone on a line when you don't need the response (e.g. a fire-and-forget webhook).
+
 ### File I/O
 | Charlotte | Python | Description |
 |-----------|--------|-------------|
@@ -279,7 +297,7 @@ bark result   woof → yap yap yap
 | `kennel 8080` | `app.run(port=8080)` | Start HTTP server (non-blocking) |
 | `leave_kennel` | `server.shutdown()` | Stop the HTTP server |
 
-Inside a `guard` block, the `request` variable is available as a collar with:
+Inside a `guard` block, the `request` variable is available as a collar (it temporarily shadows any global named `request`) with:
 - `"method"` — HTTP method (e.g. `"GET"`)
 - `"path"` — request path (e.g. `"/dogs/42"`)
 - `"headers"` — request headers as a collar
@@ -314,7 +332,7 @@ guard POST "/dogs":
 kennel 8080
 ```
 
-The server runs in a background thread. When run via the CLI (`charlotte run server.bark`), the process stays alive until Ctrl+C. Unmatched routes return 404. Errors in handlers return 500.
+The server runs in a background thread. When run via the CLI (`charlotte run server.bark`), the process stays alive until Ctrl+C (unless the script hits an uncaught error, which exits with status 1). Route paths match literally apart from `{params}`. Unmatched routes return 404, requests with other methods (e.g. `OPTIONS`, `HEAD`) get a 501, and errors in handlers return 500.
 
 ### String Methods
 | Charlotte | Python | Description |
@@ -354,7 +372,7 @@ REPL commands:
 
 The REPL supports up-arrow history (via `readline` when available).
 
-Single-line statements and bare expressions auto-execute (bare expressions evaluate and print their result). Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
+Single-line statements and bare expressions auto-execute. Bare expressions and bare calls such as `double(4)` or `pets.pop()` print their result, unless it's `napping` (like Python's REPL). Multi-line blocks (anything ending with `:`) are buffered until you type `.run`.
 
 Variables and functions defined in one `.run` session persist for the next — the REPL maintains state across executions. Use `.vars` to inspect current state. To fully reset, restart the REPL.
 
@@ -381,6 +399,7 @@ CharlotteLang is designed for trusted personal use. Several protections are buil
 - **Timeout** — requests time out after 10 seconds by default (configurable, max 30s).
 - **Response size cap** — responses are limited to 10 MB to prevent memory exhaustion.
 - **Optional host allowlist** — restrict which hosts scripts can contact (see below).
+- **Redirects re-checked** — a redirect is followed only if its target also passes the scheme restriction and host allowlist.
 
 For programmatic use, the `Interpreter` class accepts security parameters:
 
